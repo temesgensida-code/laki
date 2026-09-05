@@ -12,7 +12,7 @@
 		<!-- Single Text Logo "Laki" -->
 		<a
 			href="/"
-			class="text-xl sm:text-2xl font-bold tracking-tight transition-colors {theme.current === 'dark'
+			class="font-lexend text-xl sm:text-2xl font-bold tracking-tight transition-colors {theme.current === 'dark'
 				? 'text-[#DEDCDC] hover:text-[#C5BAC4]'
 				: 'text-[#191D23] hover:text-[#57707A]'}"
 		>
