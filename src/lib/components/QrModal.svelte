@@ -1,6 +1,7 @@
 <script>
 	import { X, QrCode, Smartphone } from '@lucide/svelte';
 	import QRCode from 'qrcode';
+	import { theme } from '$lib/utils/theme.svelte.js';
 
 	let {
 		isOpen = false,
@@ -12,12 +13,13 @@
 
 	$effect(() => {
 		if (isOpen && url) {
+			const isDark = theme.current === 'dark';
 			QRCode.toDataURL(url, {
 				width: 320,
 				margin: 2,
 				color: {
-					dark: '#ffffff',
-					light: '#090b10'
+					dark: isDark ? '#DEDCDC' : '#191D23',
+					light: isDark ? '#16191E' : '#DFDCDB'
 				}
 			})
 				.then((data) => {
@@ -40,7 +42,7 @@
 
 {#if isOpen}
 	<div
-		class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200"
+		class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200"
 		tabindex="-1"
 		role="presentation"
 	>
@@ -52,9 +54,11 @@
 			aria-label="Close modal overlay"
 		></button>
 
-		<!-- Modal Card -->
+		<!-- Modal Card with edgy geometry -->
 		<div
-			class="relative w-full max-w-sm bg-zinc-900 border border-zinc-800 rounded-2xl p-6 shadow-2xl text-center z-10"
+			class="relative w-full max-w-sm rounded-md p-6 border shadow-2xl text-center z-10 transition-colors {theme.current === 'dark'
+				? 'bg-[#21262F] border-[#57707A]/40'
+				: 'bg-[#ECEAE9] border-[#C5BAC4]'}"
 			role="dialog"
 			aria-modal="true"
 			aria-labelledby="qr-modal-title"
@@ -62,36 +66,63 @@
 			<button
 				type="button"
 				onclick={onClose}
-				class="absolute top-4 right-4 p-1.5 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors cursor-pointer"
+				class="absolute top-4 right-4 p-1.5 rounded-md border transition-colors cursor-pointer {theme.current === 'dark'
+					? 'bg-[#16191E] text-[#989DAA] hover:text-[#DEDCDC] border-[#57707A]/50'
+					: 'bg-[#DFDCDB] text-[#57707A] hover:text-[#191D23] border-[#989DAA]'}"
 				aria-label="Close"
 			>
 				<X class="w-4 h-4" />
 			</button>
 
-			<div class="inline-flex items-center justify-center w-10 h-10 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 mb-3">
+			<div
+				class="inline-flex items-center justify-center w-10 h-10 rounded-md border mb-3 transition-colors {theme.current === 'dark'
+					? 'bg-[#16191E] border-[#57707A]/60 text-[#7B919C]'
+					: 'bg-[#DFDCDB] border-[#989DAA] text-[#57707A]'}"
+			>
 				<QrCode class="w-5 h-5" />
 			</div>
 
-			<h3 id="qr-modal-title" class="text-lg font-semibold text-zinc-100 mb-1">
+			<h3
+				id="qr-modal-title"
+				class="text-lg font-bold tracking-tight mb-1 {theme.current === 'dark'
+					? 'text-[#DEDCDC]'
+					: 'text-[#191D23]'}"
+			>
 				Scan to Receive
 			</h3>
-			<p class="text-xs text-zinc-400 mb-5">
-				Point your phone camera at this QR code to open the transfer link directly on mobile.
+			<p
+				class="text-xs mb-5 {theme.current === 'dark'
+					? 'text-[#989DAA]'
+					: 'text-[#57707A]'}"
+			>
+				Point your phone camera at this QR code to open the transfer link directly.
 			</p>
 
 			<!-- QR Code Image Frame -->
-			<div class="p-4 bg-[#090b10] border border-zinc-800 rounded-xl inline-block mx-auto mb-4 shadow-inner">
+			<div
+				class="p-4 rounded-md border inline-block mx-auto mb-4 {theme.current === 'dark'
+					? 'bg-[#16191E] border-[#57707A]/50'
+					: 'bg-[#DFDCDB] border-[#989DAA]'}"
+			>
 				{#if qrDataUrl}
-					<img src={qrDataUrl} alt="Transfer QR Code" class="w-56 h-56 rounded-lg object-contain" />
+					<img src={qrDataUrl} alt="Transfer QR Code" class="w-56 h-56 rounded-sm object-contain" />
 				{:else}
-					<div class="w-56 h-56 flex items-center justify-center text-xs text-zinc-400">
+					<div
+						class="w-56 h-56 flex items-center justify-center text-xs font-mono {theme.current === 'dark'
+							? 'text-[#989DAA]'
+							: 'text-[#57707A]'}"
+					>
 						Generating QR code...
 					</div>
 				{/if}
 			</div>
 
-			<div class="flex items-center justify-center gap-1.5 text-xs text-zinc-400">
-				<Smartphone class="w-3.5 h-3.5 text-indigo-400" />
+			<div
+				class="flex items-center justify-center gap-1.5 text-xs font-mono {theme.current === 'dark'
+					? 'text-[#989DAA]'
+					: 'text-[#57707A]'}"
+			>
+				<Smartphone class="w-3.5 h-3.5 text-[#57707A]" />
 				<span>Works on any iOS / Android browser</span>
 			</div>
 		</div>
