@@ -3,6 +3,7 @@
 @layer base {
   :root {
     --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --font-lexend: 'Lexend', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     
     /* Default dark theme tokens */
@@ -36,6 +37,10 @@
     background-color: var(--color-bg-canvas);
     color: var(--color-text-main);
   }
+}
+
+.font-lexend {
+  font-family: var(--font-lexend);
 }
 
 /* Tactile & Edgy Design utility classes */
