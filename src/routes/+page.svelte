@@ -10,6 +10,7 @@
 	import QrModal from '$lib/components/QrModal.svelte';
 
 	import { SignalingClient } from '$lib/webrtc/signalingClient.js';
+	import { PeerJsSignalingClient } from '$lib/webrtc/peerjsSignalingClient.js';
 	import { TransferEngine } from '$lib/webrtc/transferEngine.js';
 	import { generateSessionId } from '$lib/utils/formatters.js';
 	import { theme } from '$lib/utils/theme.svelte.js';
@@ -32,7 +33,7 @@
 	let clientId = $state('');
 
 	// Engine & Signaling instances
-	/** @type {SignalingClient | null} */
+	/** @type {any | null} */
 	let signaling = $state(null);
 	/** @type {TransferEngine | null} */
 	let engine = $state(null);
@@ -47,6 +48,9 @@
 	let warningMessage = $state('');
 	let errorMessage = $state('');
 
+	// Cached ICE servers
+	let cachedIceServers = $state([]);
+
 	// Modals
 	let showQrModal = $state(false);
 
@@ -56,8 +60,28 @@
 		return `${window.location.origin}/?session=${sessionId}`;
 	});
 
-	onMount(() => {
+	async function fetchIceServers() {
+		if (cachedIceServers.length > 0) return cachedIceServers;
+		try {
+			const res = await fetch('/api/ice');
+			if (res.ok) {
+				const data = await res.json();
+				if (Array.isArray(data.iceServers) && data.iceServers.length > 0) {
+					cachedIceServers = data.iceServers;
+					return data.iceServers;
+				}
+			}
+		} catch (err) {
+			console.warn('[Laki] Could not load dynamic ICE servers, using defaults:', err);
+		}
+		return [];
+	}
+
+	onMount(async () => {
 		clientId = 'client-' + Math.random().toString(36).substring(2, 9);
+
+		// Pre-fetch Metered STUN/TURN ICE credentials
+		await fetchIceServers();
 
 		// Check if URL has ?session= or ?code= parameter
 		const urlParams = new URLSearchParams(window.location.search);
@@ -92,7 +116,7 @@
 	// ----------------------------------------------------
 	// SENDER WORKFLOW
 	// ----------------------------------------------------
-	function handleFileSelected(file) {
+	async function handleFileSelected(file) {
 		cleanup();
 		if (!sessionId) {
 			sessionId = generateSessionId();
@@ -103,8 +127,17 @@
 		completedResult = null;
 		stats = null;
 
-		signaling = new SignalingClient(sessionId, 'sender', clientId);
-		engine = new TransferEngine(signaling, 'sender');
+		const iceServers = await fetchIceServers();
+
+		// Use PeerJS signaling server with fallback capability
+		try {
+			signaling = new PeerJsSignalingClient(sessionId, 'sender', clientId, iceServers);
+		} catch (e) {
+			console.warn('[Laki] PeerJS signaling fallback to SSE:', e);
+			signaling = new SignalingClient(sessionId, 'sender', clientId);
+		}
+
+		engine = new TransferEngine(signaling, 'sender', iceServers);
 		setupEngineListeners(engine);
 
 		fileMeta = {
@@ -139,7 +172,7 @@
 		initReceiver(sessionId);
 	}
 
-	function initReceiver(targetSessionId) {
+	async function initReceiver(targetSessionId) {
 		cleanup();
 		errorMessage = '';
 		warningMessage = '';
@@ -147,8 +180,16 @@
 		stats = null;
 		fileMeta = null;
 
-		signaling = new SignalingClient(targetSessionId, 'receiver', clientId);
-		engine = new TransferEngine(signaling, 'receiver');
+		const iceServers = await fetchIceServers();
+
+		try {
+			signaling = new PeerJsSignalingClient(targetSessionId, 'receiver', clientId, iceServers);
+		} catch (e) {
+			console.warn('[Laki] PeerJS signaling fallback to SSE:', e);
+			signaling = new SignalingClient(targetSessionId, 'receiver', clientId);
+		}
+
+		engine = new TransferEngine(signaling, 'receiver', iceServers);
 		setupEngineListeners(engine);
 
 		transferState = 'waiting-peer';
