@@ -310,7 +310,7 @@
 				<span>Direct Peer-to-Peer Transfer • End-to-End Encrypted</span>
 			</div>
 			<h1
-				class="text-3xl sm:text-5xl font-extrabold tracking-tight mb-3 sm:mb-4 {theme.current === 'dark'
+				class="font-lexend text-3xl sm:text-5xl font-extrabold tracking-tight mb-3 sm:mb-4 {theme.current === 'dark'
 					? 'text-[#DEDCDC]'
 					: 'text-[#191D23]'}"
 			>
