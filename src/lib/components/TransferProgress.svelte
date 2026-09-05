@@ -7,7 +7,8 @@
 		Clock,
 		Timer,
 		Activity,
-		Layers
+		Layers,
+		Network
 	} from '@lucide/svelte';
 	import { formatBytes, formatSpeed, formatEta, formatDuration } from '$lib/utils/formatters.js';
 	import { theme } from '$lib/utils/theme.svelte.js';
@@ -39,9 +40,9 @@
 		? 'bg-[#21262F] border-[#57707A]/40 shadow-lg'
 		: 'bg-[#ECEAE9] border-[#C5BAC4] shadow-md'}"
 >
-	<!-- Top Row: Status badge and Actions -->
-	<div class="flex items-center justify-between gap-3 mb-4">
-		<div class="flex items-center gap-2">
+	<!-- Top Row: Status badge, Route badge, and Actions -->
+	<div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+		<div class="flex flex-wrap items-center gap-2">
 			{#if isPaused}
 				<span
 					class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-sm text-xs font-semibold border {theme.current === 'dark'
@@ -51,8 +52,7 @@
 					<Pause class="w-3 h-3" />
 					<span>Transfer Paused</span>
 				</span>
-			{:else if stats?.networkQuality === 'reconnecting'}
-				<span
+			{:else if stats?.networkQuality === 'reconnecting'}\n				<span
 					class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-sm text-xs font-semibold border animate-pulse {theme.current === 'dark'
 						? 'bg-[#16191E] border-orange-500/40 text-orange-400'
 						: 'bg-[#DFDCDB] border-orange-600/40 text-orange-700'}"
@@ -76,7 +76,30 @@
 						: 'bg-[#DFDCDB] border-[#7B919C] text-[#191D23]'}"
 				>
 					<span class="w-1.5 h-1.5 rounded-full bg-[#57707A] animate-ping"></span>
-					<span>{isSender ? 'Streaming Chunks to Receiver' : 'Receiving Direct P2P Stream'}</span>
+					<span>{isSender ? 'Streaming Chunks to Receiver' : 'Receiving WebRTC Stream'}</span>
+				</span>
+			{/if}
+
+			<!-- Route Type Badge: Direct P2P vs Metered TURN Relay -->
+			{#if stats?.routeType === 'relay'}
+				<span
+					class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-sm text-xs font-mono font-semibold border {theme.current === 'dark'
+						? 'bg-[#16191E] border-amber-500/50 text-amber-300'
+						: 'bg-[#DFDCDB] border-amber-600/50 text-amber-800'}"
+					title="WebRTC traversing Metered.ca TURN relay server"
+				>
+					<span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+					<span>TURN Relay ({stats?.relayProtocol?.toUpperCase() || 'UDP'})</span>
+				</span>
+			{:else if stats?.connectionStatus === 'connected'}
+				<span
+					class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-sm text-xs font-mono font-semibold border {theme.current === 'dark'
+						? 'bg-[#16191E] border-emerald-500/50 text-emerald-300'
+						: 'bg-[#DFDCDB] border-emerald-600/50 text-emerald-800'}"
+					title="Direct peer-to-peer connection without relay intermediary"
+				>
+					<span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+					<span>Direct P2P</span>
 				</span>
 			{/if}
 		</div>
@@ -124,8 +147,7 @@
 						? 'text-[#DEDCDC]'
 						: 'text-[#191D23]'}"
 				>
-					{progressPercent}%
-				</span>
+					{progressPercent}%\n				</span>
 				<span
 					class="text-xs font-mono {theme.current === 'dark'
 						? 'text-[#989DAA]'
@@ -163,131 +185,74 @@
 		</div>
 	</div>
 
-	<!-- Telemetry Metrics Grid (Edgy boxes) -->
-	<div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3 text-xs">
-		<!-- Speed -->
+	<!-- Telemetry Grid: Speed, ETA, Elapsed, Chunk status (Edgy Cards) -->
+	<div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3">
+		<!-- Tile 1: Speed -->
 		<div
-			class="p-3 rounded-sm border {theme.current === 'dark'
-				? 'bg-[#16191E] border-[#57707A]/40'
+			class="p-3 rounded-md border transition-colors {theme.current === 'dark'
+				? 'bg-[#16191E] border-[#57707A]/30'
 				: 'bg-[#DFDCDB] border-[#C5BAC4]'}"
 		>
-			<div
-				class="flex items-center gap-1.5 mb-1 {theme.current === 'dark'
-					? 'text-[#989DAA]'
-					: 'text-[#57707A]'}"
-			>
-				<Activity class="w-3.5 h-3.5 text-[#57707A]" />
-				<span>Speed</span>
+			<div class="flex items-center gap-1.5 text-xs mb-1 {theme.current === 'dark' ? 'text-[#989DAA]' : 'text-[#57707A]'}">
+				<Gauge class="w-3.5 h-3.5 text-[#57707A]" />
+				<span>Transfer Speed</span>
 			</div>
-			<div
-				class="font-mono text-sm font-semibold {theme.current === 'dark'
-					? 'text-[#DEDCDC]'
-					: 'text-[#191D23]'}"
-			>
+			<div class="text-sm sm:text-base font-bold font-mono {theme.current === 'dark' ? 'text-[#DEDCDC]' : 'text-[#191D23]'}">
 				{formatSpeed(stats?.speed || 0)}
 			</div>
 		</div>
 
-		<!-- Time Remaining / ETA -->
+		<!-- Tile 2: Estimated Time Remaining -->
 		<div
-			class="p-3 rounded-sm border {theme.current === 'dark'
-				? 'bg-[#16191E] border-[#57707A]/40'
+			class="p-3 rounded-md border transition-colors {theme.current === 'dark'
+				? 'bg-[#16191E] border-[#57707A]/30'
 				: 'bg-[#DFDCDB] border-[#C5BAC4]'}"
 		>
-			<div
-				class="flex items-center gap-1.5 mb-1 {theme.current === 'dark'
-					? 'text-[#989DAA]'
-					: 'text-[#57707A]'}"
-			>
+			<div class="flex items-center gap-1.5 text-xs mb-1 {theme.current === 'dark' ? 'text-[#989DAA]' : 'text-[#57707A]'}">
 				<Timer class="w-3.5 h-3.5 text-[#7B919C]" />
-				<span>ETA</span>
+				<span>ETA Remaining</span>
 			</div>
-			<div
-				class="font-mono text-sm font-semibold {theme.current === 'dark'
-					? 'text-[#DEDCDC]'
-					: 'text-[#191D23]'}"
-			>
+			<div class="text-sm sm:text-base font-bold font-mono {theme.current === 'dark' ? 'text-[#DEDCDC]' : 'text-[#191D23]'}">
 				{formatEta(stats?.eta || 0)}
 			</div>
 		</div>
 
-		<!-- Elapsed Time -->
+		<!-- Tile 3: Elapsed Time -->
 		<div
-			class="p-3 rounded-sm border {theme.current === 'dark'
-				? 'bg-[#16191E] border-[#57707A]/40'
+			class="p-3 rounded-md border transition-colors {theme.current === 'dark'
+				? 'bg-[#16191E] border-[#57707A]/30'
 				: 'bg-[#DFDCDB] border-[#C5BAC4]'}"
 		>
-			<div
-				class="flex items-center gap-1.5 mb-1 {theme.current === 'dark'
-					? 'text-[#989DAA]'
-					: 'text-[#57707A]'}"
-			>
+			<div class="flex items-center gap-1.5 text-xs mb-1 {theme.current === 'dark' ? 'text-[#989DAA]' : 'text-[#57707A]'}">
 				<Clock class="w-3.5 h-3.5 text-[#989DAA]" />
-				<span>Elapsed</span>
+				<span>Elapsed Time</span>
 			</div>
-			<div
-				class="font-mono text-sm font-semibold {theme.current === 'dark'
-					? 'text-[#DEDCDC]'
-					: 'text-[#191D23]'}"
-			>
+			<div class="text-sm sm:text-base font-bold font-mono {theme.current === 'dark' ? 'text-[#DEDCDC]' : 'text-[#191D23]'}">
 				{formatDuration(stats?.elapsedTime || 0)}
 			</div>
 		</div>
 
-		<!-- Chunks count -->
+		<!-- Tile 4: Chunks / Slices -->
 		<div
-			class="p-3 rounded-sm border {theme.current === 'dark'
-				? 'bg-[#16191E] border-[#57707A]/40'
+			class="p-3 rounded-md border transition-colors {theme.current === 'dark'
+				? 'bg-[#16191E] border-[#57707A]/30'
 				: 'bg-[#DFDCDB] border-[#C5BAC4]'}"
 		>
-			<div
-				class="flex items-center gap-1.5 mb-1 {theme.current === 'dark'
-					? 'text-[#989DAA]'
-					: 'text-[#57707A]'}"
-			>
+			<div class="flex items-center gap-1.5 text-xs mb-1 {theme.current === 'dark' ? 'text-[#989DAA]' : 'text-[#57707A]'}">
 				<Layers class="w-3.5 h-3.5 text-[#57707A]" />
-				<span>Chunks</span>
+				<span>Chunks Streamed</span>
 			</div>
-			<div
-				class="font-mono text-sm font-semibold {theme.current === 'dark'
-					? 'text-[#DEDCDC]'
-					: 'text-[#191D23]'}"
-			>
+			<div class="text-sm sm:text-base font-bold font-mono {theme.current === 'dark' ? 'text-[#DEDCDC]' : 'text-[#191D23]'}">
 				{stats?.currentChunk || 0} / {stats?.totalChunks || 0}
 			</div>
 		</div>
 	</div>
 
-	<!-- Flow Control Backpressure status -->
-	{#if isSender && typeof stats?.bufferPercentage === 'number' && stats.bufferPercentage > 10}
-		<div
-			class="mt-3 pt-3 border-t flex items-center justify-between text-[11px] {theme.current === 'dark'
-				? 'border-[#57707A]/30 text-[#989DAA]'
-				: 'border-[#C5BAC4] text-[#57707A]'}"
-		>
-			<div class="flex items-center gap-1.5">
-				<span>WebRTC SCTP Buffer Backpressure:</span>
-			</div>
-			<div class="flex items-center gap-2">
-				<div class="w-20 h-1.5 rounded-none bg-zinc-800 overflow-hidden">
-					<div class="h-full bg-[#57707A]" style="width: {stats.bufferPercentage}%;"></div>
-				</div>
-				<span class="font-mono font-semibold">{Math.round(stats.bufferPercentage)}%</span>
-			</div>
+	<!-- Backpressure Flow Control Status Bar (Sender only) -->
+	{#if isSender && (stats?.bufferPercentage || 0) > 20}
+		<div class="mt-3 pt-3 border-t flex items-center justify-between text-xs font-mono {theme.current === 'dark' ? 'border-[#57707A]/30 text-[#989DAA]' : 'border-[#C5BAC4] text-[#57707A]'}">
+			<span>Buffer Watermark Pressure</span>
+			<span class="font-bold">{(stats?.bufferPercentage || 0).toFixed(0)}%</span>
 		</div>
 	{/if}
 </div>
-
-<style>
-	@keyframes shimmer {
-		0% {
-			transform: translateX(-100%);
-		}
-		100% {
-			transform: translateX(100%);
-		}
-	}
-	.animate-shimmer {
-		animation: shimmer 1.8s infinite linear;
-	}
-</style>
