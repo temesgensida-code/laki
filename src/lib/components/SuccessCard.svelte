@@ -1,6 +1,9 @@
 <script>
-	import { CheckCircle2, Download, ArrowRight, Zap, ShieldCheck, Clock, Gauge, FileCheck } from '@lucide/svelte';
+	import { onMount } from 'svelte';
+	import { CheckCircle2, Download, ArrowRight } from '@lucide/svelte';
 	import { formatBytes, formatSpeed, formatDuration } from '$lib/utils/formatters.js';
+	import { theme } from '$lib/utils/theme.svelte.js';
+	import { playChime } from '$lib/utils/sound.js';
 
 	let {
 		result = null,
@@ -8,7 +11,12 @@
 		onReset = () => {}
 	} = $props();
 
+	onMount(() => {
+		playChime('success');
+	});
+
 	function triggerDownload() {
+		playChime('click');
 		if (result?.url && result?.filename) {
 			const a = document.createElement('a');
 			a.href = result.url;
@@ -18,43 +26,73 @@
 			document.body.removeChild(a);
 		}
 	}
+
+	function handleReset() {
+		playChime('click');
+		onReset();
+	}
 </script>
 
-<div class="w-full bg-zinc-900/90 border border-zinc-800 rounded-2xl p-6 sm:p-8 shadow-2xl text-center relative overflow-hidden">
-	<!-- Background glow effect -->
-	<div class="absolute -top-24 left-1/2 -translate-x-1/2 w-64 h-64 bg-emerald-500/10 blur-3xl pointer-events-none"></div>
-
-	<!-- Checkmark badge -->
-	<div class="inline-flex items-center justify-center w-16 h-16 rounded-3xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 mb-5 shadow-lg shadow-emerald-500/10 animate-in zoom-in-75 duration-300">
-		<CheckCircle2 class="w-9 h-9" />
+<div
+	class="w-full rounded-md p-6 sm:p-8 border text-center relative overflow-hidden transition-colors duration-200 {theme.current === 'dark'
+		? 'bg-[#21262F] border-[#57707A]/40 shadow-2xl'
+		: 'bg-[#ECEAE9] border-[#C5BAC4] shadow-xl'}"
+>
+	<!-- Checkmark badge with edgy styling -->
+	<div
+		class="inline-flex items-center justify-center w-14 h-14 rounded-md border mb-5 transition-colors {theme.current === 'dark'
+			? 'bg-[#16191E] border-[#57707A] text-[#7B919C]'
+			: 'bg-[#DFDCDB] border-[#57707A] text-[#57707A]'}"
+	>
+		<CheckCircle2 class="w-8 h-8" />
 	</div>
 
-	<h3 class="text-xl sm:text-2xl font-bold text-white mb-2">
-		Transfer Complete!
+	<h3
+		class="text-xl sm:text-2xl font-bold tracking-tight mb-2 {theme.current === 'dark'
+			? 'text-[#DEDCDC]'
+			: 'text-[#191D23]'}"
+	>
+		Transfer Complete
 	</h3>
-	<p class="text-sm text-zinc-400 max-w-md mx-auto mb-6">
+	<p
+		class="text-xs sm:text-sm max-w-md mx-auto mb-6 {theme.current === 'dark'
+			? 'text-[#989DAA]'
+			: 'text-[#57707A]'}"
+	>
 		{isReceiver
 			? 'The file was successfully assembled and verified in your browser memory.'
 			: 'All chunks have been securely streamed and acknowledged by the receiver.'}
 	</p>
 
-	<!-- Transfer Stats Summary -->
+	<!-- Transfer Stats Summary (Edgy boxes) -->
 	<div class="grid grid-cols-3 gap-2 sm:gap-3 max-w-lg mx-auto mb-6 text-left">
-		<div class="p-3 rounded-xl bg-zinc-950/60 border border-zinc-800/80">
-			<span class="text-[11px] text-zinc-400 block mb-0.5">Total Size</span>
-			<span class="font-mono text-xs sm:text-sm font-semibold text-zinc-100">
+		<div
+			class="p-3 rounded-sm border {theme.current === 'dark'
+				? 'bg-[#16191E] border-[#57707A]/40'
+				: 'bg-[#DFDCDB] border-[#C5BAC4]'}"
+		>
+			<span class="text-[11px] block mb-0.5 font-mono {theme.current === 'dark' ? 'text-[#989DAA]' : 'text-[#57707A]'}">Total Size</span>
+			<span class="font-mono text-xs sm:text-sm font-semibold {theme.current === 'dark' ? 'text-[#DEDCDC]' : 'text-[#191D23]'}">
 				{formatBytes(result?.size || result?.totalBytes || 0)}
 			</span>
 		</div>
-		<div class="p-3 rounded-xl bg-zinc-950/60 border border-zinc-800/80">
-			<span class="text-[11px] text-zinc-400 block mb-0.5">Duration</span>
-			<span class="font-mono text-xs sm:text-sm font-semibold text-zinc-100">
+		<div
+			class="p-3 rounded-sm border {theme.current === 'dark'
+				? 'bg-[#16191E] border-[#57707A]/40'
+				: 'bg-[#DFDCDB] border-[#C5BAC4]'}"
+		>
+			<span class="text-[11px] block mb-0.5 font-mono {theme.current === 'dark' ? 'text-[#989DAA]' : 'text-[#57707A]'}">Duration</span>
+			<span class="font-mono text-xs sm:text-sm font-semibold {theme.current === 'dark' ? 'text-[#DEDCDC]' : 'text-[#191D23]'}">
 				{formatDuration(result?.duration || 0)}
 			</span>
 		</div>
-		<div class="p-3 rounded-xl bg-zinc-950/60 border border-zinc-800/80">
-			<span class="text-[11px] text-zinc-400 block mb-0.5">Avg Speed</span>
-			<span class="font-mono text-xs sm:text-sm font-semibold text-emerald-400">
+		<div
+			class="p-3 rounded-sm border {theme.current === 'dark'
+				? 'bg-[#16191E] border-[#57707A]/40'
+				: 'bg-[#DFDCDB] border-[#C5BAC4]'}"
+		>
+			<span class="text-[11px] block mb-0.5 font-mono {theme.current === 'dark' ? 'text-[#989DAA]' : 'text-[#57707A]'}">Avg Speed</span>
+			<span class="font-mono text-xs sm:text-sm font-semibold text-[#57707A]">
 				{formatSpeed(result?.averageSpeed || 0)}
 			</span>
 		</div>
@@ -66,7 +104,7 @@
 			<button
 				type="button"
 				onclick={triggerDownload}
-				class="w-full sm:w-auto px-6 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm shadow-lg shadow-emerald-600/20 transition-all duration-150 active:scale-[0.98] cursor-pointer flex items-center justify-center gap-2"
+				class="w-full sm:w-auto px-6 py-2.5 rounded-md bg-[#57707A] hover:bg-[#7B919C] text-white font-semibold text-xs sm:text-sm shadow border border-[#7B919C] transition-all duration-150 active:translate-y-px cursor-pointer flex items-center justify-center gap-2"
 			>
 				<Download class="w-4 h-4" />
 				<span>Download Again ({result.filename})</span>
@@ -75,11 +113,13 @@
 
 		<button
 			type="button"
-			onclick={onReset}
-			class="w-full sm:w-auto px-5 py-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-medium text-sm border border-zinc-700 transition-colors cursor-pointer flex items-center justify-center gap-2"
+			onclick={handleReset}
+			class="w-full sm:w-auto px-5 py-2.5 rounded-md border text-xs sm:text-sm font-semibold transition-colors cursor-pointer flex items-center justify-center gap-2 active:translate-y-px {theme.current === 'dark'
+				? 'bg-[#16191E] hover:bg-[#191D23] text-[#DEDCDC] border-[#57707A]/50'
+				: 'bg-[#DFDCDB] hover:bg-[#D2CECE] text-[#191D23] border-[#989DAA]'}"
 		>
 			<span>Transfer Another File</span>
-			<ArrowRight class="w-4 h-4 text-zinc-400" />
+			<ArrowRight class="w-4 h-4 text-[#989DAA]" />
 		</button>
 	</div>
 </div>
