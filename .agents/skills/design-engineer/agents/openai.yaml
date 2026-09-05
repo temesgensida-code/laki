@@ -1,0 +1,4 @@
+interface:
+  display_name: "Design Engineer"
+  short_description: "Build apps, sites, and component systems"
+  default_prompt: "Use $design-engineer to design or build a polished app, website, dashboard, docs site, or component library."

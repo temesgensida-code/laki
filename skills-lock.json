@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "design-engineer": {
+      "source": "farming-labs/design-eng-skills",
+      "sourceType": "github",
+      "skillPath": "design-engineer/SKILL.md",
+      "computedHash": "d12ac64f0d507e5d34fa9cbe449974236ed43d7395c19b47a50b038f01490996"
+    }
+  }
+}
