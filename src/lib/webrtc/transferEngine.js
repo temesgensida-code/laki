@@ -23,16 +23,20 @@ import {
  * @property {number} bufferPercentage
  * @property {string} connectionStatus
  * @property {string} networkQuality ('optimal' | 'reconnecting' | 'stalled' | 'offline')
+ * @property {'direct' | 'relay'} [routeType]
+ * @property {string} [relayProtocol]
  */
 
 export class TransferEngine {
 	/**
-	 * @param {import('./signalingClient.js').SignalingClient} signaling
+	 * @param {import('./signalingClient.js').SignalingClient | import('./peerjsSignalingClient.js').PeerJsSignalingClient} signaling
 	 * @param {'sender' | 'receiver'} role
+	 * @param {Array<RTCIceServer>} [customIceServers]
 	 */
-	constructor(signaling, role) {
+	constructor(signaling, role, customIceServers = null) {
 		this.signaling = signaling;
 		this.role = role;
+		this.customIceServers = customIceServers;
 
 		/** @type {RTCPeerConnection | null} */
 		this.pc = null;
@@ -66,6 +70,11 @@ export class TransferEngine {
 		this.statsInterval = null;
 		this.lastChunkTime = 0;
 		this.stallCheckInterval = null;
+
+		// Route detection (Direct vs Metered TURN Relay)
+		this.routeType = 'direct'; // 'direct' | 'relay'
+		this.relayProtocol = 'udp';
+		this.isRelayAvailable = false;
 
 		// Resilience & retry
 		this.retryAttempts = 0;
@@ -197,7 +206,7 @@ export class TransferEngine {
 	}
 
 	/**
-	 * Initialize RTCPeerConnection and listeners.
+	 * Initialize RTCPeerConnection with dynamic Metered STUN/TURN configuration.
 	 */
 	initPeerConnection() {
 		if (this.pc) {
@@ -208,7 +217,15 @@ export class TransferEngine {
 			}
 		}
 
-		this.pc = new RTCPeerConnection(RTC_CONFIG);
+		const rtcOptions = {
+			iceServers:
+				this.customIceServers && this.customIceServers.length > 0
+					? this.customIceServers
+					: RTC_CONFIG.iceServers,
+			iceCandidatePoolSize: 10
+		};
+
+		this.pc = new RTCPeerConnection(rtcOptions);
 
 		this.pc.onicecandidate = (event) => {
 			if (event.candidate) {
@@ -229,6 +246,8 @@ export class TransferEngine {
 				this.warningMessage = '';
 				this.retryAttempts = 0;
 
+				this.inspectRouteType();
+
 				if (this.state === 'reconnecting') {
 					this.state = 'transferring';
 					this.emit('state-change', this.state);
@@ -244,7 +263,9 @@ export class TransferEngine {
 			const state = this.pc?.connectionState;
 			this.emit('connection-state-change', state);
 
-			if (state === 'failed') {
+			if (state === 'connected') {
+				this.inspectRouteType();
+			} else if (state === 'failed') {
 				this.handleIceFailure();
 			}
 		};
@@ -255,6 +276,40 @@ export class TransferEngine {
 			this.pc.ondatachannel = (event) => {
 				this.setupReceiverDataChannel(event.channel);
 			};
+		}
+	}
+
+	/**
+	 * Inspect RTCStats to determine if connection is direct P2P or relayed via TURN.
+	 */
+	async inspectRouteType() {
+		if (!this.pc) return;
+		try {
+			const stats = await this.pc.getStats();
+			let selectedPair = null;
+
+			stats.forEach((report) => {
+				if (report.type === 'transport' && report.selectedCandidatePairId) {
+					selectedPair = stats.get(report.selectedCandidatePairId);
+				} else if (report.type === 'candidate-pair' && (report.selected || report.nominated)) {
+					selectedPair = report;
+				}
+			});
+
+			if (selectedPair) {
+				const localCandidate = stats.get(selectedPair.localCandidateId);
+				const remoteCandidate = stats.get(selectedPair.remoteCandidateId);
+
+				const isRelayed =
+					localCandidate?.candidateType === 'relay' ||
+					remoteCandidate?.candidateType === 'relay';
+
+				this.routeType = isRelayed ? 'relay' : 'direct';
+				this.relayProtocol =
+					localCandidate?.protocol || remoteCandidate?.protocol || 'udp';
+			}
+		} catch {
+			// ignore stats retrieval errors
 		}
 	}
 
@@ -271,6 +326,7 @@ export class TransferEngine {
 
 		this.dataChannel.onopen = () => {
 			this.emit('datachannel-open');
+			this.inspectRouteType();
 		};
 
 		this.dataChannel.onclose = () => {
@@ -287,7 +343,6 @@ export class TransferEngine {
 				if (typeof event.data === 'string') {
 					const msg = JSON.parse(event.data);
 					if (msg.type === 'ack') {
-						// Receiver acknowledge
 						this.emit('ack-received', msg);
 					} else if (msg.type === 'pause') {
 						this.handleRemotePause();
@@ -313,6 +368,7 @@ export class TransferEngine {
 
 		this.dataChannel.onopen = () => {
 			this.emit('datachannel-open');
+			this.inspectRouteType();
 		};
 
 		this.dataChannel.onclose = () => {
@@ -503,11 +559,11 @@ export class TransferEngine {
 		if (this.dataChannel?.readyState === 'open') {
 			this.dataChannel.send(JSON.stringify({ type: 'reject-transfer' }));
 		}
-		this.signaling.send('reject-transfer', { accepted: false });
+		this.signaling.send('reject-transfer', { rejected: true });
 	}
 
 	/**
-	 * Sender starts transmitting chunks.
+	 * Sender begins streaming file chunks.
 	 */
 	async startSending() {
 		if (this.role !== 'sender' || !this.file) return;
@@ -516,7 +572,6 @@ export class TransferEngine {
 		this.transferStartTime = Date.now();
 		this.emit('state-change', this.state);
 
-		// Inform receiver of file start
 		if (this.dataChannel?.readyState === 'open') {
 			this.dataChannel.send(JSON.stringify({ type: 'file-start', ...this.fileMeta }));
 		}
@@ -583,67 +638,56 @@ export class TransferEngine {
 			}
 		}
 
-		// Transmission complete
-		if (chunkIndex >= this.totalChunks && this.state === 'transferring') {
-			this.dataChannel.send(JSON.stringify({ type: 'file-end' }));
+		// Finish transfer
+		if (this.bytesTransferred >= this.totalBytes) {
 			this.stopTelemetry();
 			this.state = 'completed';
-			this.emit('state-change', this.state);
+
+			if (this.dataChannel?.readyState === 'open') {
+				this.dataChannel.send(JSON.stringify({ type: 'file-end' }));
+			}
+
+			const duration = (Date.now() - this.transferStartTime - this.totalPausedDuration) / 1000;
+			const averageSpeed = this.totalBytes / Math.max(1, duration);
+
 			this.emit('transfer-complete', {
 				totalBytes: this.totalBytes,
-				duration: (Date.now() - this.transferStartTime - this.totalPausedDuration) / 1000,
-				averageSpeed: this.totalBytes / Math.max(1, (Date.now() - this.transferStartTime - this.totalPausedDuration) / 1000)
+				duration,
+				averageSpeed,
+				filename: this.fileMeta?.name
 			});
+			this.emit('state-change', this.state);
 		}
 	}
 
-	/**
-	 * Wait for buffered amount to drain below threshold.
-	 */
-	waitForBufferDrain() {
+	async waitForBufferDrain() {
+		if (!this.dataChannel) return;
 		return new Promise((resolve) => {
-			if (!this.dataChannel || this.dataChannel.bufferedAmount <= BUFFERED_AMOUNT_LOW_THRESHOLD) {
-				resolve();
-				return;
-			}
+			const check = () => {
+				if (!this.dataChannel || this.dataChannel.bufferedAmount <= BUFFERED_AMOUNT_LOW_THRESHOLD) {
+					resolve();
+				} else {
+					setTimeout(check, 10);
+				}
+			};
+			check();
+		});
+	}
 
-			const onLow = () => {
-				this.dataChannel?.removeEventListener('bufferedamountlow', onLow);
+	async waitForChannelOpen() {
+		if (!this.dataChannel) return;
+		if (this.dataChannel.readyState === 'open') return;
+
+		return new Promise((resolve) => {
+			const onOpen = () => {
+				this.dataChannel?.removeEventListener('open', onOpen);
 				resolve();
 			};
-
-			this.dataChannel.addEventListener('bufferedamountlow', onLow);
-
-			// Safety fallback timeout in case browser event fails to fire
-			setTimeout(() => {
-				this.dataChannel?.removeEventListener('bufferedamountlow', onLow);
-				resolve();
-			}, 300);
+			this.dataChannel.addEventListener('open', onOpen);
+			setTimeout(resolve, 5000);
 		});
 	}
 
-	/**
-	 * Wait for channel to transition to open.
-	 */
-	waitForChannelOpen() {
-		return new Promise((resolve) => {
-			if (this.dataChannel?.readyState === 'open') {
-				resolve();
-				return;
-			}
-
-			const check = setInterval(() => {
-				if (this.dataChannel?.readyState === 'open' || this.isDestroyed || this.state === 'error') {
-					clearInterval(check);
-					resolve();
-				}
-			}, 250);
-		});
-	}
-
-	/**
-	 * Toggle pause / resume transfer.
-	 */
 	togglePause() {
 		if (this.isPaused) {
 			this.resume();
@@ -731,9 +775,11 @@ export class TransferEngine {
 	 * @param {string} reason
 	 */
 	handleNetworkFluctuation(reason) {
+		if (this.state === 'reconnecting' || this.isDestroyed) return;
+
 		console.warn('[Engine] Network fluctuation:', reason);
 		this.networkQuality = 'reconnecting';
-		this.warningMessage = 'Network fluctuation detected. Re-establishing link...';
+		this.warningMessage = reason;
 		this.emit('warning', this.warningMessage);
 
 		if (this.state === 'transferring') {
@@ -743,21 +789,20 @@ export class TransferEngine {
 
 		if (!this.iceDisconnectTimer) {
 			this.iceDisconnectTimer = setTimeout(() => {
-				if (this.pc?.iceConnectionState === 'disconnected' || this.pc?.connectionState === 'disconnected') {
-					this.handleIceFailure();
-				}
+				console.warn('[Engine] Disconnect grace period expired, attempting ICE restart');
+				this.handleIceFailure();
 			}, ICE_DISCONNECT_GRACE_PERIOD_MS);
 		}
 	}
 
 	/**
-	 * Attempt ICE restart when connection fails.
+	 * Force ICE restart or re-negotiate connection when connection failed.
 	 */
 	async handleIceFailure() {
+		if (this.isDestroyed) return;
+
 		if (this.retryAttempts >= MAX_RETRY_ATTEMPTS) {
-			this.setError(
-				`Peer connection lost after ${MAX_RETRY_ATTEMPTS} reconnection attempts. Please check network connectivity and try again.`
-			);
+			this.setError('Connection failed after maximum retry attempts. Check firewall or network settings.');
 			return;
 		}
 
@@ -766,27 +811,9 @@ export class TransferEngine {
 		this.warningMessage = `Attempting connection recovery (Attempt ${this.retryAttempts}/${MAX_RETRY_ATTEMPTS})...`;
 		this.emit('warning', this.warningMessage);
 
-		try {
-			if (this.role === 'sender') {
-				await this.createAndSendOffer(true);
-			} else {
-				this.signaling.send('request-resume', {
-					startFromChunk: this.chunksReceivedCount
-				});
-			}
-		} catch (err) {
-			console.error('[Engine] ICE restart attempt failed:', err);
-		}
-	}
+		console.log(`[Engine] Initiating ICE restart recovery attempt ${this.retryAttempts}...`);
 
-	/**
-	 * Force retry and re-negotiate connection.
-	 */
-	forceRetry() {
-		this.errorMessage = '';
-		this.warningMessage = 'Retrying WebRTC connection...';
-		this.retryAttempts = 0;
-		this.networkQuality = 'reconnecting';
+		// Re-initialize PeerConnection with ICE restart
 		this.initPeerConnection();
 
 		if (this.role === 'sender') {
@@ -796,6 +823,11 @@ export class TransferEngine {
 				startFromChunk: this.chunksReceivedCount
 			});
 		}
+	}
+
+	forceRetry() {
+		this.retryAttempts = 0;
+		this.handleIceFailure();
 	}
 
 	/**
@@ -828,6 +860,7 @@ export class TransferEngine {
 		this.stopTelemetry();
 
 		this.statsInterval = setInterval(() => {
+			this.inspectRouteType();
 			this.emitStats();
 		}, 250);
 
@@ -882,7 +915,9 @@ export class TransferEngine {
 			totalChunks: this.totalChunks,
 			bufferPercentage: bufferPct,
 			connectionStatus: this.pc?.connectionState || 'disconnected',
-			networkQuality: this.networkQuality
+			networkQuality: this.networkQuality,
+			routeType: this.routeType,
+			relayProtocol: this.relayProtocol
 		};
 
 		this.emit('stats', stats);
@@ -926,7 +961,6 @@ export class TransferEngine {
 			this.pc = null;
 		}
 
-		this.receivedChunks = [];
 		this.listeners = {};
 	}
 }
