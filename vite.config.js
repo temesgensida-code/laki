@@ -16,5 +16,23 @@ export default defineConfig({
 			// adapter-auto only supports some environments, see https://svelte.dev/docs/kit/adapter-auto for a list.
 			adapter: adapter()
 		})
-	]
+	],
+	server: {
+		proxy: {
+			'/peerjs': {
+				target: 'http://127.0.0.1:9000',
+				ws: true,
+				changeOrigin: true
+			}
+		}
+	},
+	preview: {
+		proxy: {
+			'/peerjs': {
+				target: 'http://127.0.0.1:9000',
+				ws: true,
+				changeOrigin: true
+			}
+		}
+	}
 });
