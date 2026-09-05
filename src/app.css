@@ -2,7 +2,53 @@
 
 @layer base {
   :root {
-    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-    --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    
+    /* Default dark theme tokens */
+    --color-bg-canvas: #191D23;
+    --color-bg-card: #21262F;
+    --color-bg-well: #16191E;
+    --color-border-main: #57707A;
+    --color-border-subtle: rgba(87, 112, 122, 0.35);
+    --color-text-main: #DEDCDC;
+    --color-text-muted: #989DAA;
+    --color-text-accent: #7B919C;
+    --color-accent-btn: #57707A;
+    --color-accent-hover: #7B919C;
   }
+
+  html.light {
+    /* Light theme tokens */
+    --color-bg-canvas: #DEDCDC;
+    --color-bg-card: #ECEAE9;
+    --color-bg-well: #DFDCDB;
+    --color-border-main: #7B919C;
+    --color-border-subtle: rgba(197, 186, 196, 0.7);
+    --color-text-main: #191D23;
+    --color-text-muted: #57707A;
+    --color-text-accent: #7B919C;
+    --color-accent-btn: #57707A;
+    --color-accent-hover: #191D23;
+  }
+
+  body {
+    background-color: var(--color-bg-canvas);
+    color: var(--color-text-main);
+  }
+}
+
+/* Tactile & Edgy Design utility classes */
+.edgy-card {
+  border-radius: 0.375rem; /* 6px crisp edgy radius */
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
+}
+
+.edgy-btn {
+  border-radius: 0.375rem; /* 6px crisp edgy radius */
+  transition: all 0.15s ease-in-out;
+}
+
+.edgy-btn:active {
+  transform: translateY(1px);
 }
