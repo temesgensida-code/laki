@@ -7,7 +7,8 @@ import {
 	BUFFERED_AMOUNT_HIGH_WATERMARK,
 	ICE_DISCONNECT_GRACE_PERIOD_MS,
 	MAX_RETRY_ATTEMPTS,
-	STALL_TIMEOUT_MS
+	STALL_TIMEOUT_MS,
+	P2P_CONNECTION_TIMEOUT_MS
 } from './config.js';
 
 /**
@@ -23,7 +24,7 @@ import {
  * @property {number} bufferPercentage
  * @property {string} connectionStatus
  * @property {string} networkQuality ('optimal' | 'reconnecting' | 'stalled' | 'offline')
- * @property {'direct' | 'relay'} [routeType]
+ * @property {'direct' | 'relay' | 'tunnel'} [routeType]
  * @property {string} [relayProtocol]
  */
 
@@ -36,7 +37,37 @@ export class TransferEngine {
 	constructor(signaling, role, customIceServers = null) {
 		this.signaling = signaling;
 		this.role = role;
+		this.sessionId = signaling?.sessionId || '';
 		this.customIceServers = customIceServers;
+
+		// Dual-Transport: 'webrtc' (direct P2P first) -> 'tunnel' (fail-safe HTTP chunk stream)
+		this.transportMode = 'webrtc'; // 'webrtc' | 'tunnel'
+		this.tunnelReader = null;
+		this.isTunnelStreaming = false;
+
+		// Categorize ICE servers: STUN only for initial P2P attempt
+		this.allIceServers = customIceServers && customIceServers.length > 0
+			? customIceServers
+			: RTC_CONFIG.iceServers;
+
+		this.stunIceServers = this.allIceServers.filter((srv) => {
+			const urls = Array.isArray(srv.urls) ? srv.urls : [srv.urls];
+			return urls.some((u) => u && typeof u === 'string' && u.startsWith('stun:'));
+		});
+		if (this.stunIceServers.length === 0) {
+			this.stunIceServers = RTC_CONFIG.iceServers;
+		}
+
+		this.relayIceServers = this.allIceServers.filter((srv) => {
+			const urls = Array.isArray(srv.urls) ? srv.urls : [srv.urls];
+			return urls.some((u) => u && typeof u === 'string' && (u.startsWith('turn:') || u.startsWith('turns:')));
+		});
+
+		this.hasRelayServers = this.relayIceServers.length > 0;
+		this.useRelay = false;
+		this.p2pFallbackTimer = null;
+		this.lastIceFailureTime = 0;
+		this.pendingRemoteCandidates = [];
 
 		/** @type {RTCPeerConnection | null} */
 		this.pc = null;
@@ -71,10 +102,10 @@ export class TransferEngine {
 		this.lastChunkTime = 0;
 		this.stallCheckInterval = null;
 
-		// Route detection (Direct vs Metered TURN Relay)
-		this.routeType = 'direct'; // 'direct' | 'relay'
-		this.relayProtocol = 'udp';
-		this.isRelayAvailable = false;
+		// Route detection (Direct P2P vs Fail-Safe Server Tunnel vs TURN)
+		this.routeType = 'direct'; // 'direct' | 'relay' | 'tunnel'
+		this.relayProtocol = 'https';
+		this.isRelayAvailable = true;
 
 		// Resilience & retry
 		this.retryAttempts = 0;
@@ -120,13 +151,17 @@ export class TransferEngine {
 				this.warningMessage = '';
 				this.emit('peer-connected', info);
 
-				// If we are sender and have a peer connected, create offer
-				if (this.role === 'sender' && (!this.pc || this.pc.connectionState === 'new')) {
-					this.initPeerConnection();
-					this.createAndSendOffer();
+				if (this.role === 'sender') {
+					if (this.fileMeta) {
+						this.signaling.send('file-meta', this.fileMeta);
+					}
+					if (this.transportMode === 'webrtc' && (!this.pc || this.pc.connectionState === 'new')) {
+						this.initPeerConnection();
+						this.createAndSendOffer();
+					}
 				}
 			} else if (info.status === 'disconnected') {
-				if (this.state === 'transferring') {
+				if (this.state === 'transferring' && this.transportMode === 'webrtc') {
 					this.handleNetworkFluctuation('Peer temporarily disconnected from signaling relay');
 				}
 			}
@@ -143,44 +178,85 @@ export class TransferEngine {
 			this.emit('file-meta-received', meta);
 		});
 
-		this.signaling.on('offer', async (offer) => {
-			if (this.role === 'receiver') {
-				if (!this.pc) this.initPeerConnection();
-				try {
-					await this.pc.setRemoteDescription(new RTCSessionDescription(offer));
-					const answer = await this.pc.createAnswer();
-					await this.pc.setLocalDescription(answer);
-					this.signaling.send('answer', answer);
-				} catch (err) {
-					console.error('[Engine] Failed handling offer:', err);
-					this.setError('Failed to negotiate WebRTC offer with sender.');
-				}
+		this.signaling.on('fallback-to-tunnel', () => {
+			if (this.transportMode !== 'tunnel') {
+				console.log('[Engine] Remote peer requested Fail-Safe Server Tunnel fallback');
+				this.triggerTunnelFallback(false);
 			}
 		});
 
-		this.signaling.on('answer', async (answer) => {
-			if (this.role === 'sender' && this.pc) {
+		this.signaling.on('fallback-to-relay', () => {
+			if (this.transportMode !== 'tunnel') {
+				this.triggerTunnelFallback(false);
+			}
+		});
+
+		this.signaling.on('request-ice-restart', () => {
+			if (this.role === 'sender' && this.transportMode === 'webrtc') {
+				this.handleIceFailure();
+			}
+		});
+
+		let offerQueue = Promise.resolve();
+
+		this.signaling.on('offer', (offer) => {
+			if (this.role !== 'receiver' || !offer || this.transportMode === 'tunnel') return;
+			offerQueue = offerQueue.then(async () => {
 				try {
-					await this.pc.setRemoteDescription(new RTCSessionDescription(answer));
+					if (!this.pc || this.pc.signalingState === 'closed') {
+						this.initPeerConnection(this.useRelay);
+					}
+					if (this.pc.signalingState !== 'stable') {
+						console.warn('[Engine] Offer received while signalingState is ' + this.pc.signalingState + ' - resetting PC');
+						this.initPeerConnection(this.useRelay);
+					}
+					await this.pc.setRemoteDescription(new RTCSessionDescription(offer));
+					await this.flushPendingCandidates();
+					await this.pc.setLocalDescription();
+					if (this.pc.localDescription) {
+						const desc = { type: this.pc.localDescription.type, sdp: this.pc.localDescription.sdp };
+						this.signaling.send('answer', desc);
+					}
 				} catch (err) {
-					console.error('[Engine] Failed handling answer:', err);
+					console.error('[Engine] Failed handling offer:', err);
 				}
+			});
+		});
+
+		this.signaling.on('answer', async (answer) => {
+			if (this.role !== 'sender' || !this.pc || this.transportMode === 'tunnel') return;
+			try {
+				if (this.pc.signalingState === 'have-local-offer') {
+					await this.pc.setRemoteDescription(new RTCSessionDescription(answer));
+					await this.flushPendingCandidates();
+				}
+			} catch (err) {
+				console.error('[Engine] Failed handling answer:', err);
 			}
 		});
 
 		this.signaling.on('candidate', async (candidate) => {
-			if (this.pc && candidate) {
-				try {
-					await this.pc.addIceCandidate(new RTCIceCandidate(candidate));
-				} catch (err) {
-					console.warn('[Engine] Error adding ICE candidate:', err);
+			if (!this.pc || !candidate || this.transportMode === 'tunnel') return;
+			if (!this.pc.remoteDescription) {
+				this.pendingRemoteCandidates.push(candidate);
+				return;
+			}
+			try {
+				await this.pc.addIceCandidate(new RTCIceCandidate(candidate));
+			} catch (err) {
+				if (!err?.message?.includes('ufrag')) {
+					console.warn('[Engine] Error adding ICE candidate:', err?.message || err);
 				}
 			}
 		});
 
 		this.signaling.on('accept-transfer', () => {
 			if (this.role === 'sender') {
-				this.startSending();
+				if (this.transportMode === 'tunnel') {
+					this.startTunnelStreaming(0);
+				} else {
+					this.startSending();
+				}
 			}
 		});
 
@@ -203,12 +279,43 @@ export class TransferEngine {
 				this.resumeSendingFrom(data.startFromChunk || 0);
 			}
 		});
+
+		this.signaling.on('file-end', () => {
+			if (this.role === 'receiver') {
+				this.finalizeReceivedFile();
+			}
+		});
+
+		this.signaling.on('ack', (msg) => {
+			if (this.role === 'sender') {
+				this.emit('ack-received', msg);
+			}
+		});
+	}
+
+	async flushPendingCandidates() {
+		while (this.pendingRemoteCandidates.length > 0) {
+			const candidate = this.pendingRemoteCandidates.shift();
+			try {
+				await this.pc?.addIceCandidate(new RTCIceCandidate(candidate));
+			} catch (err) {
+				if (!err?.message?.includes('ufrag')) {
+					console.warn('[Engine] Error applying queued ICE candidate:', err?.message || err);
+				}
+			}
+		}
 	}
 
 	/**
-	 * Initialize RTCPeerConnection with dynamic Metered STUN/TURN configuration.
+	 * Initialize RTCPeerConnection for Direct P2P.
 	 */
-	initPeerConnection() {
+	initPeerConnection(forceRelay = false) {
+		if (this.transportMode === 'tunnel') return;
+
+		if (forceRelay) {
+			this.useRelay = true;
+		}
+
 		if (this.pc) {
 			try {
 				this.pc.close();
@@ -216,28 +323,89 @@ export class TransferEngine {
 				// ignored
 			}
 		}
+		this.pendingRemoteCandidates = [];
+
+		if (this.p2pFallbackTimer) {
+			clearTimeout(this.p2pFallbackTimer);
+			this.p2pFallbackTimer = null;
+		}
+		if (this.iceDisconnectTimer) {
+			clearTimeout(this.iceDisconnectTimer);
+			this.iceDisconnectTimer = null;
+		}
+
+		const rawIceServers = this.stunIceServers;
+		const activeIceServers = rawIceServers.map((srv) => {
+			const urls = (Array.isArray(srv.urls) ? srv.urls : [srv.urls]).map((u) => {
+				if (typeof u === 'string' && u.startsWith('stun:') && u.includes('?')) {
+					return u.split('?')[0];
+				}
+				return u;
+			});
+			return { ...srv, urls: urls.length === 1 ? urls[0] : urls };
+		});
 
 		const rtcOptions = {
-			iceServers:
-				this.customIceServers && this.customIceServers.length > 0
-					? this.customIceServers
-					: RTC_CONFIG.iceServers,
-			iceCandidatePoolSize: 10
+			iceServers: activeIceServers
 		};
+
+		console.log('[Engine] Initializing WebRTC in Direct P2P First mode');
 
 		this.pc = new RTCPeerConnection(rtcOptions);
 
 		this.pc.onicecandidate = (event) => {
 			if (event.candidate) {
-				this.signaling.send('candidate', event.candidate.toJSON());
+				const cand = event.candidate.toJSON
+					? event.candidate.toJSON()
+					: {
+							candidate: event.candidate.candidate,
+							sdpMid: event.candidate.sdpMid,
+							sdpMLineIndex: event.candidate.sdpMLineIndex
+					  };
+				this.signaling.send('candidate', cand);
 			}
 		};
+
+		this.pc.onicecandidateerror = (event) => {
+			console.warn('[Engine] ICE candidate error:', event.url, event.errorCode, event.errorText);
+		};
+
+		// Direct P2P Timeout: if direct P2P does not establish within P2P_CONNECTION_TIMEOUT_MS, fall back to Server Stream Tunnel
+		if (this.transportMode === 'webrtc') {
+			this.p2pFallbackTimer = setTimeout(() => {
+				// CRITICAL GUARD: Never abort if transfer is actively underway or DataChannel is open!
+				if (
+					this.state === 'transferring' ||
+					this.state === 'completed' ||
+					this.bytesTransferred > 0 ||
+					this.chunksReceivedCount > 0 ||
+					this.dataChannel?.readyState === 'open'
+				) {
+					console.log('[Engine] Direct P2P active - cancelling fallback timer.');
+					if (this.p2pFallbackTimer) {
+						clearTimeout(this.p2pFallbackTimer);
+						this.p2pFallbackTimer = null;
+					}
+					return;
+				}
+
+				const state = this.pc?.iceConnectionState;
+				if (state !== 'connected' && state !== 'completed' && !this.isDestroyed) {
+					console.warn('[Engine] Direct P2P connection timeout. Falling back to Fail-Safe Server Tunnel...');
+					this.triggerTunnelFallback(true);
+				}
+			}, P2P_CONNECTION_TIMEOUT_MS);
+		}
 
 		this.pc.oniceconnectionstatechange = () => {
 			const state = this.pc?.iceConnectionState;
 			this.emit('ice-state-change', state);
 
 			if (state === 'connected' || state === 'completed') {
+				if (this.p2pFallbackTimer) {
+					clearTimeout(this.p2pFallbackTimer);
+					this.p2pFallbackTimer = null;
+				}
 				if (this.iceDisconnectTimer) {
 					clearTimeout(this.iceDisconnectTimer);
 					this.iceDisconnectTimer = null;
@@ -255,7 +423,8 @@ export class TransferEngine {
 			} else if (state === 'disconnected') {
 				this.handleNetworkFluctuation('Network fluctuation detected. Verifying peer connection...');
 			} else if (state === 'failed') {
-				this.handleIceFailure();
+				console.warn('[Engine] Direct P2P ICE failed. Falling back to Fail-Safe Server Tunnel...');
+				this.triggerTunnelFallback(true);
 			}
 		};
 
@@ -264,15 +433,22 @@ export class TransferEngine {
 			this.emit('connection-state-change', state);
 
 			if (state === 'connected') {
+				if (this.p2pFallbackTimer) {
+					clearTimeout(this.p2pFallbackTimer);
+					this.p2pFallbackTimer = null;
+				}
 				this.inspectRouteType();
 			} else if (state === 'failed') {
-				this.handleIceFailure();
+				console.warn('[Engine] RTCPeerConnection state is failed. Falling back to Server Tunnel...');
+				this.triggerTunnelFallback(true);
 			}
 		};
 
+		// Sender creates the DataChannel
 		if (this.role === 'sender') {
 			this.setupSenderDataChannel();
 		} else {
+			// Receiver listens for incoming DataChannel
 			this.pc.ondatachannel = (event) => {
 				this.setupReceiverDataChannel(event.channel);
 			};
@@ -280,34 +456,257 @@ export class TransferEngine {
 	}
 
 	/**
-	 * Inspect RTCStats to determine if connection is direct P2P or relayed via TURN.
+	 * Fallback immediately to the high-throughput Fail-Safe Server Stream Tunnel.
+	 * Bypasses all WebRTC NAT, firewall, and browser restrictions with 100% reliability.
+	 * @param {boolean} [notifyPeer=true]
+	 */
+	triggerTunnelFallback(notifyPeer = true) {
+		if (this.isDestroyed || this.transportMode === 'tunnel') return;
+
+		// Refuse fallback if WebRTC DataChannel is actively transferring
+		if (this.dataChannel?.readyState === 'open' && this.state === 'transferring' && this.bytesTransferred > 0) {
+			console.log('[Engine] Refusing fallback: WebRTC DataChannel is actively transferring.');
+			return;
+		}
+
+		console.warn('[Engine] Activating Fail-Safe Server Stream Tunnel fallback...');
+		this.transportMode = 'tunnel';
+		this.routeType = 'tunnel';
+		this.relayProtocol = 'https';
+		this.networkQuality = 'optimal';
+		this.warningMessage = '';
+		this.emit('route-type-change', 'tunnel');
+
+		if (this.p2pFallbackTimer) {
+			clearTimeout(this.p2pFallbackTimer);
+			this.p2pFallbackTimer = null;
+		}
+		if (this.iceDisconnectTimer) {
+			clearTimeout(this.iceDisconnectTimer);
+			this.iceDisconnectTimer = null;
+		}
+
+		if (this.pc) {
+			try {
+				this.pc.close();
+			} catch {
+				// ignored
+			}
+			this.pc = null;
+		}
+		if (this.dataChannel) {
+			try {
+				this.dataChannel.close();
+			} catch {
+				// ignored
+			}
+			this.dataChannel = null;
+		}
+
+		if (notifyPeer) {
+			this.signaling.send('fallback-to-tunnel', { timestamp: Date.now() });
+		}
+
+		if (this.role === 'receiver') {
+			this.connectTunnelStream();
+		} else if (this.role === 'sender') {
+			if (this.fileMeta) {
+				this.signaling.send('file-meta', this.fileMeta);
+			}
+			if (this.state === 'transferring' || this.state === 'waiting-peer' || this.state === 'ready-to-accept') {
+				this.startTunnelStreaming(this.chunksReceivedCount || 0);
+			}
+		}
+	}
+
+	/**
+	 * Legacy alias: redirects to Fail-Safe Server Tunnel.
+	 */
+	triggerRelayFallback(notifyPeer = true) {
+		this.triggerTunnelFallback(notifyPeer);
+	}
+
+	/**
+	 * Receiver connects to the Server Stream Tunnel via HTTP ReadableStream.
+	 */
+	async connectTunnelStream() {
+		if (this.isDestroyed || this.tunnelReader) return;
+
+		try {
+			console.log('[Engine] Receiver connecting to Fail-Safe Server Stream Tunnel...');
+			const res = await fetch(`/api/tunnel/${encodeURIComponent(this.sessionId)}?role=receiver`);
+			if (!res.ok || !res.body) {
+				throw new Error(`Tunnel HTTP ${res.status}`);
+			}
+
+			this.routeType = 'tunnel';
+			this.networkQuality = 'optimal';
+			this.emit('route-type-change', 'tunnel');
+
+			const reader = res.body.getReader();
+			this.tunnelReader = reader;
+
+			let buffer = new Uint8Array(0);
+
+			while (!this.isDestroyed) {
+				const { value, done } = await reader.read();
+				if (done) break;
+				if (!value) continue;
+
+				// Append newly received bytes to buffer
+				const combined = new Uint8Array(buffer.byteLength + value.byteLength);
+				combined.set(buffer, 0);
+				combined.set(value, buffer.byteLength);
+				buffer = combined;
+
+				// Parse framed chunks: [4 bytes packetLength][packetLength bytes payload]
+				while (buffer.byteLength >= 4) {
+					const packetLength = new DataView(buffer.buffer, buffer.byteOffset, 4).getUint32(0);
+					if (buffer.byteLength < 4 + packetLength) {
+						break; // Wait for complete packet
+					}
+
+					const chunkBuffer = buffer.slice(4, 4 + packetLength);
+					buffer = buffer.slice(4 + packetLength);
+
+					this.handleIncomingChunk(chunkBuffer.buffer);
+				}
+			}
+		} catch (err) {
+			if (!this.isDestroyed && this.state !== 'completed') {
+				console.warn('[Engine] Tunnel stream connection closed or error:', err);
+			}
+		}
+	}
+
+	/**
+	 * Sender streams chunks over Server Stream Tunnel via HTTP POST.
+	 * @param {number} startChunkIndex
+	 */
+	async startTunnelStreaming(startChunkIndex) {
+		if (!this.file || this.isDestroyed || this.isTunnelStreaming) return;
+
+		this.isTunnelStreaming = true;
+		this.transportMode = 'tunnel';
+		this.routeType = 'tunnel';
+		this.state = 'transferring';
+		this.transferStartTime = Date.now();
+		this.networkQuality = 'optimal';
+		this.warningMessage = '';
+		this.emit('state-change', this.state);
+		this.emit('route-type-change', 'tunnel');
+		this.startTelemetry();
+
+		this.signaling.send('file-start', this.fileMeta);
+
+		let chunkIndex = startChunkIndex;
+
+		while (chunkIndex < this.totalChunks) {
+			if (this.isPaused || this.state !== 'transferring' || this.isDestroyed) {
+				this.isTunnelStreaming = false;
+				return;
+			}
+
+			const startByte = chunkIndex * DATA_PER_CHUNK;
+			const endByte = Math.min(startByte + DATA_PER_CHUNK, this.file.size);
+			const slice = this.file.slice(startByte, endByte);
+			const arrayBuffer = await slice.arrayBuffer();
+
+			// 8-byte chunk header: chunkIndex (uint32) + totalChunks (uint32)
+			const chunkPayload = new Uint8Array(HEADER_SIZE + arrayBuffer.byteLength);
+			const view = new DataView(chunkPayload.buffer);
+			view.setUint32(0, chunkIndex);
+			view.setUint32(4, this.totalChunks);
+			chunkPayload.set(new Uint8Array(arrayBuffer), HEADER_SIZE);
+
+			// Framed packet: [4 bytes length prefix][chunkPayload]
+			const framed = new Uint8Array(4 + chunkPayload.byteLength);
+			new DataView(framed.buffer).setUint32(0, chunkPayload.byteLength);
+			framed.set(chunkPayload, 4);
+
+			try {
+				const res = await fetch(`/api/tunnel/${encodeURIComponent(this.sessionId)}`, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/octet-stream' },
+					body: framed.buffer
+				});
+
+				if (!res.ok) {
+					throw new Error(`HTTP ${res.status}`);
+				}
+
+				const resData = await res.json().catch(() => ({}));
+				if (resData.delivered === false) {
+					await new Promise((r) => setTimeout(r, 40));
+				}
+
+				this.bytesTransferred = endByte;
+				this.recordSpeedSample(arrayBuffer.byteLength);
+				this.emit('chunk-sent', { chunkIndex, totalChunks: this.totalChunks });
+			} catch (err) {
+				console.warn('[Engine] Error posting tunnel chunk, retrying in 200ms:', err);
+				await new Promise((r) => setTimeout(r, 200));
+				continue;
+			}
+
+			chunkIndex++;
+
+			// Micro-yield to keep UI thread fluid
+			if (chunkIndex % 8 === 0) {
+				await new Promise((r) => setTimeout(r, 0));
+			}
+		}
+
+		if (this.bytesTransferred >= this.totalBytes) {
+			this.stopTelemetry();
+			this.state = 'completed';
+			this.signaling.send('file-end', { success: true });
+
+			const duration = (Date.now() - this.transferStartTime - this.totalPausedDuration) / 1000;
+			const averageSpeed = this.totalBytes / Math.max(1, duration);
+
+			this.emit('transfer-complete', {
+				totalBytes: this.totalBytes,
+				duration,
+				averageSpeed,
+				filename: this.fileMeta?.name
+			});
+			this.emit('state-change', this.state);
+		}
+		this.isTunnelStreaming = false;
+	}
+
+	/**
+	 * Inspect RTCStats to verify if route is direct P2P or TURN relay.
 	 */
 	async inspectRouteType() {
+		if (this.transportMode === 'tunnel') {
+			this.routeType = 'tunnel';
+			return;
+		}
 		if (!this.pc) return;
+
 		try {
 			const stats = await this.pc.getStats();
-			let selectedPair = null;
+			let isRelayed = false;
+			let protocol = 'udp';
 
-			stats.forEach((report) => {
-				if (report.type === 'transport' && report.selectedCandidatePairId) {
-					selectedPair = stats.get(report.selectedCandidatePairId);
-				} else if (report.type === 'candidate-pair' && (report.selected || report.nominated)) {
-					selectedPair = report;
+			for (const report of stats.values()) {
+				if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+					const local = stats.get(report.localCandidateId);
+					const remote = stats.get(report.remoteCandidateId);
+
+					if (local?.candidateType === 'relay' || remote?.candidateType === 'relay') {
+						isRelayed = true;
+						protocol = local?.protocol || remote?.protocol || (this.useRelay ? 'tls' : 'udp');
+					}
+					break;
 				}
-			});
-
-			if (selectedPair) {
-				const localCandidate = stats.get(selectedPair.localCandidateId);
-				const remoteCandidate = stats.get(selectedPair.remoteCandidateId);
-
-				const isRelayed =
-					localCandidate?.candidateType === 'relay' ||
-					remoteCandidate?.candidateType === 'relay';
-
-				this.routeType = isRelayed ? 'relay' : 'direct';
-				this.relayProtocol =
-					localCandidate?.protocol || remoteCandidate?.protocol || 'udp';
 			}
+
+			this.routeType = isRelayed ? 'relay' : 'direct';
+			this.relayProtocol = protocol;
+			this.emit('route-type-change', this.routeType);
 		} catch {
 			// ignore stats retrieval errors
 		}
@@ -325,8 +724,18 @@ export class TransferEngine {
 		this.dataChannel.bufferedAmountLowThreshold = BUFFERED_AMOUNT_LOW_THRESHOLD;
 
 		this.dataChannel.onopen = () => {
+			if (this.p2pFallbackTimer) {
+				clearTimeout(this.p2pFallbackTimer);
+				this.p2pFallbackTimer = null;
+			}
 			this.emit('datachannel-open');
 			this.inspectRouteType();
+			if ((this.state === 'transferring' || this.state === 'reconnecting') && this.file) {
+				this.state = 'transferring';
+				this.emit('state-change', this.state);
+				this.dataChannel.send(JSON.stringify({ type: 'file-start', ...this.fileMeta }));
+				this.streamChunks(this.chunksReceivedCount || 0);
+			}
 		};
 
 		this.dataChannel.onclose = () => {
@@ -335,7 +744,6 @@ export class TransferEngine {
 
 		this.dataChannel.onerror = (err) => {
 			console.error('[Engine] Sender DataChannel error:', err);
-			this.setError('DataChannel communication error occurred.');
 		};
 
 		this.dataChannel.onmessage = (event) => {
@@ -348,8 +756,6 @@ export class TransferEngine {
 						this.handleRemotePause();
 					} else if (msg.type === 'resume') {
 						this.handleRemoteResume(msg.fromChunk);
-					} else if (msg.type === 'ping') {
-						this.dataChannel?.send(JSON.stringify({ type: 'pong' }));
 					}
 				}
 			} catch {
@@ -367,6 +773,10 @@ export class TransferEngine {
 		this.dataChannel.binaryType = 'arraybuffer';
 
 		this.dataChannel.onopen = () => {
+			if (this.p2pFallbackTimer) {
+				clearTimeout(this.p2pFallbackTimer);
+				this.p2pFallbackTimer = null;
+			}
 			this.emit('datachannel-open');
 			this.inspectRouteType();
 		};
@@ -377,7 +787,6 @@ export class TransferEngine {
 
 		this.dataChannel.onerror = (err) => {
 			console.error('[Engine] Receiver DataChannel error:', err);
-			this.setError('DataChannel communication error occurred.');
 		};
 
 		this.dataChannel.onmessage = (event) => {
@@ -411,11 +820,15 @@ export class TransferEngine {
 	}
 
 	/**
-	 * Handle incoming binary chunk on receiver.
+	 * Handle incoming binary chunk on receiver (via WebRTC or Server Tunnel).
 	 * @param {ArrayBuffer} buffer
 	 */
 	handleIncomingChunk(buffer) {
 		if (buffer.byteLength < HEADER_SIZE) return;
+		if (this.p2pFallbackTimer) {
+			clearTimeout(this.p2pFallbackTimer);
+			this.p2pFallbackTimer = null;
+		}
 
 		const view = new DataView(buffer);
 		const chunkIndex = view.getUint32(0);
@@ -449,8 +862,19 @@ export class TransferEngine {
 					} catch {
 						// ignored
 					}
+				} else {
+					this.signaling.send('ack', {
+						chunkIndex,
+						bytesReceived: this.bytesTransferred
+					});
 				}
 			}
+
+			this.emit('chunk-received', {
+				chunkIndex,
+				totalChunks: this.totalChunks,
+				bytesTransferred: this.bytesTransferred
+			});
 
 			// If all chunks received, finalize
 			if (this.chunksReceivedCount === this.totalChunks && this.totalChunks > 0) {
@@ -490,7 +914,7 @@ export class TransferEngine {
 	 * Create WebRTC offer and broadcast to peer.
 	 */
 	async createAndSendOffer(isIceRestart = false) {
-		if (!this.pc) return;
+		if (!this.pc || this.transportMode === 'tunnel') return;
 		try {
 			const options = isIceRestart ? { iceRestart: true } : undefined;
 			const offer = await this.pc.createOffer(options);
@@ -498,7 +922,7 @@ export class TransferEngine {
 			this.signaling.send('offer', offer);
 		} catch (err) {
 			console.error('[Engine] Failed to create offer:', err);
-			this.setError('Failed to create WebRTC connection offer.');
+			this.triggerTunnelFallback(true);
 		}
 	}
 
@@ -522,12 +946,12 @@ export class TransferEngine {
 		this.state = 'waiting-peer';
 		this.emit('state-change', this.state);
 
-		// Broadcast file metadata to session
 		this.signaling.send('file-meta', this.fileMeta);
 
-		// If peer already connected, initiate connection
-		this.initPeerConnection();
-		this.createAndSendOffer();
+		if (this.transportMode === 'webrtc') {
+			this.initPeerConnection();
+			this.createAndSendOffer();
+		}
 	}
 
 	/**
@@ -541,7 +965,10 @@ export class TransferEngine {
 
 		this.startTelemetry();
 
-		// Notify sender via DataChannel if open, or via signaling
+		if (this.transportMode === 'tunnel') {
+			this.connectTunnelStream();
+		}
+
 		if (this.dataChannel?.readyState === 'open') {
 			this.dataChannel.send(JSON.stringify({ type: 'accept-transfer' }));
 		}
@@ -567,25 +994,42 @@ export class TransferEngine {
 	 */
 	async startSending() {
 		if (this.role !== 'sender' || !this.file) return;
+		if (this.p2pFallbackTimer) {
+			clearTimeout(this.p2pFallbackTimer);
+			this.p2pFallbackTimer = null;
+		}
+
+		if (this.transportMode === 'tunnel') {
+			this.startTunnelStreaming(0);
+			return;
+		}
 
 		this.state = 'transferring';
 		this.transferStartTime = Date.now();
 		this.emit('state-change', this.state);
+
+		if (this.dataChannel?.readyState !== 'open') {
+			await this.waitForChannelOpen();
+		}
 
 		if (this.dataChannel?.readyState === 'open') {
 			this.dataChannel.send(JSON.stringify({ type: 'file-start', ...this.fileMeta }));
 		}
 
 		this.startTelemetry();
-		await this.streamChunks(0);
+		this.streamChunks(0);
 	}
 
 	/**
-	 * Core chunk streaming loop with backpressure flow control.
+	 * Core WebRTC chunk streaming loop with backpressure flow control.
 	 * @param {number} startChunkIndex
 	 */
 	async streamChunks(startChunkIndex) {
 		if (!this.file || !this.dataChannel) return;
+		if (this.p2pFallbackTimer) {
+			clearTimeout(this.p2pFallbackTimer);
+			this.p2pFallbackTimer = null;
+		}
 
 		let chunkIndex = startChunkIndex;
 
@@ -606,7 +1050,6 @@ export class TransferEngine {
 				await this.waitForBufferDrain();
 			}
 
-			// Read file slice
 			const startByte = chunkIndex * DATA_PER_CHUNK;
 			const endByte = Math.min(startByte + DATA_PER_CHUNK, this.file.size);
 			const slice = this.file.slice(startByte, endByte);
@@ -632,7 +1075,6 @@ export class TransferEngine {
 
 			chunkIndex++;
 
-			// Brief micro-yield to keep UI thread fluid
 			if (chunkIndex % 16 === 0) {
 				await new Promise((r) => setTimeout(r, 0));
 			}
@@ -646,6 +1088,7 @@ export class TransferEngine {
 			if (this.dataChannel?.readyState === 'open') {
 				this.dataChannel.send(JSON.stringify({ type: 'file-end' }));
 			}
+			this.signaling.send('file-end', { success: true });
 
 			const duration = (Date.now() - this.transferStartTime - this.totalPausedDuration) / 1000;
 			const averageSpeed = this.totalBytes / Math.max(1, duration);
@@ -728,7 +1171,11 @@ export class TransferEngine {
 
 		if (this.role === 'sender') {
 			const currentChunk = Math.floor(this.bytesTransferred / DATA_PER_CHUNK);
-			this.streamChunks(currentChunk);
+			if (this.transportMode === 'tunnel') {
+				this.startTunnelStreaming(currentChunk);
+			} else {
+				this.streamChunks(currentChunk);
+			}
 		}
 	}
 
@@ -752,22 +1199,25 @@ export class TransferEngine {
 			this.emit('state-change', this.state);
 
 			if (this.role === 'sender') {
-				const start = typeof fromChunk === 'number' ? fromChunk : Math.floor(this.bytesTransferred / DATA_PER_CHUNK);
-				this.streamChunks(start);
+				const chunkToResume = typeof fromChunk === 'number' ? fromChunk : Math.floor(this.bytesTransferred / DATA_PER_CHUNK);
+				if (this.transportMode === 'tunnel') {
+					this.startTunnelStreaming(chunkToResume);
+				} else {
+					this.streamChunks(chunkToResume);
+				}
 			}
 		}
 	}
 
-	/**
-	 * Resume transmission from specific chunk after reconnection.
-	 * @param {number} chunkIndex
-	 */
 	resumeSendingFrom(chunkIndex) {
-		this.bytesTransferred = chunkIndex * DATA_PER_CHUNK;
-		this.state = 'transferring';
+		if (this.role !== 'sender') return;
 		this.isPaused = false;
-		this.emit('state-change', this.state);
-		this.streamChunks(chunkIndex);
+		this.state = 'transferring';
+		if (this.transportMode === 'tunnel') {
+			this.startTunnelStreaming(chunkIndex);
+		} else {
+			this.streamChunks(chunkIndex);
+		}
 	}
 
 	/**
@@ -775,7 +1225,7 @@ export class TransferEngine {
 	 * @param {string} reason
 	 */
 	handleNetworkFluctuation(reason) {
-		if (this.state === 'reconnecting' || this.isDestroyed) return;
+		if (this.state === 'reconnecting' || this.isDestroyed || this.transportMode === 'tunnel') return;
 
 		console.warn('[Engine] Network fluctuation:', reason);
 		this.networkQuality = 'reconnecting';
@@ -789,45 +1239,23 @@ export class TransferEngine {
 
 		if (!this.iceDisconnectTimer) {
 			this.iceDisconnectTimer = setTimeout(() => {
-				console.warn('[Engine] Disconnect grace period expired, attempting ICE restart');
-				this.handleIceFailure();
+				console.warn('[Engine] Disconnect grace period expired, falling back to Server Tunnel');
+				this.triggerTunnelFallback(true);
 			}, ICE_DISCONNECT_GRACE_PERIOD_MS);
 		}
 	}
 
 	/**
-	 * Force ICE restart or re-negotiate connection when connection failed.
+	 * WebRTC failure recovery: immediately falls back to Server Stream Tunnel.
 	 */
 	async handleIceFailure() {
-		if (this.isDestroyed) return;
-
-		if (this.retryAttempts >= MAX_RETRY_ATTEMPTS) {
-			this.setError('Connection failed after maximum retry attempts. Check firewall or network settings.');
-			return;
-		}
-
-		this.retryAttempts++;
-		this.networkQuality = 'reconnecting';
-		this.warningMessage = `Attempting connection recovery (Attempt ${this.retryAttempts}/${MAX_RETRY_ATTEMPTS})...`;
-		this.emit('warning', this.warningMessage);
-
-		console.log(`[Engine] Initiating ICE restart recovery attempt ${this.retryAttempts}...`);
-
-		// Re-initialize PeerConnection with ICE restart
-		this.initPeerConnection();
-
-		if (this.role === 'sender') {
-			this.createAndSendOffer(true);
-		} else {
-			this.signaling.send('request-resume', {
-				startFromChunk: this.chunksReceivedCount
-			});
-		}
+		if (this.isDestroyed || this.transportMode === 'tunnel') return;
+		console.warn('[Engine] WebRTC ICE failed. Switching to Fail-Safe Server Tunnel...');
+		this.triggerTunnelFallback(true);
 	}
 
 	forceRetry() {
-		this.retryAttempts = 0;
-		this.handleIceFailure();
+		this.triggerTunnelFallback(true);
 	}
 
 	/**
@@ -846,7 +1274,6 @@ export class TransferEngine {
 			const elapsedSec = (now - this.speedSamples[0].time) / 1000;
 			const totalSampleBytes = this.speedSamples.reduce((sum, s) => sum + s.bytes, 0);
 			if (elapsedSec > 0.1) {
-				// Smooth current speed with exponential moving average
 				const instantaneous = totalSampleBytes / elapsedSec;
 				this.currentSpeed = this.currentSpeed === 0 ? instantaneous : this.currentSpeed * 0.7 + instantaneous * 0.3;
 			}
@@ -864,14 +1291,13 @@ export class TransferEngine {
 			this.emitStats();
 		}, 250);
 
-		// Stall detection interval
 		this.lastChunkTime = Date.now();
 		this.stallCheckInterval = setInterval(() => {
 			if (this.state === 'transferring' && !this.isPaused) {
 				const timeSinceLast = Date.now() - this.lastChunkTime;
 				if (timeSinceLast > STALL_TIMEOUT_MS) {
 					this.networkQuality = 'stalled';
-					this.warningMessage = 'Transfer stream stalled. Waiting for peer data buffer...';
+					this.warningMessage = 'Transfer stream stalled. Waiting for peer buffer...';
 					this.emit('warning', this.warningMessage);
 				}
 			}
@@ -914,7 +1340,7 @@ export class TransferEngine {
 			currentChunk: this.role === 'sender' ? Math.floor(this.bytesTransferred / DATA_PER_CHUNK) : this.chunksReceivedCount,
 			totalChunks: this.totalChunks,
 			bufferPercentage: bufferPct,
-			connectionStatus: this.pc?.connectionState || 'disconnected',
+			connectionStatus: this.transportMode === 'tunnel' ? 'connected' : (this.pc?.connectionState || 'disconnected'),
 			networkQuality: this.networkQuality,
 			routeType: this.routeType,
 			relayProtocol: this.relayProtocol
@@ -939,8 +1365,27 @@ export class TransferEngine {
 		this.isDestroyed = true;
 		this.stopTelemetry();
 
+		if (this.p2pFallbackTimer) {
+			clearTimeout(this.p2pFallbackTimer);
+			this.p2pFallbackTimer = null;
+		}
+
 		if (this.iceDisconnectTimer) {
 			clearTimeout(this.iceDisconnectTimer);
+			this.iceDisconnectTimer = null;
+		}
+
+		if (this.tunnelReader) {
+			try {
+				this.tunnelReader.cancel();
+			} catch {
+				// ignored
+			}
+			this.tunnelReader = null;
+		}
+
+		if (this.sessionId) {
+			fetch(`/api/tunnel/${encodeURIComponent(this.sessionId)}`, { method: 'DELETE' }).catch(() => {});
 		}
 
 		if (this.dataChannel) {

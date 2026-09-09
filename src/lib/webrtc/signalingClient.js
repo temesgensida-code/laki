@@ -124,7 +124,9 @@ export class SignalingClient {
 				'resume-transfer',
 				'cancel-transfer',
 				'ping',
-				'request-resume'
+				'request-resume',
+				'fallback-to-relay',
+				'request-ice-restart'
 			];
 
 			for (const ev of knownEvents) {

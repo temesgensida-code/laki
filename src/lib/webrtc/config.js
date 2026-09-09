@@ -4,15 +4,14 @@
 
 export const RTC_CONFIG = {
 	iceServers: [
-		{ urls: 'stun:stun.l.google.com:19302' },
-		{ urls: 'stun:stun1.l.google.com:19302' },
-		{ urls: 'stun:stun2.l.google.com:19302' },
-		{ urls: 'stun:stun3.l.google.com:19302' },
-		{ urls: 'stun:stun4.l.google.com:19302' },
-		{ urls: 'stun:global.stun.twilio.com:3478' }
+		{ urls: 'stun:stun.relay.metered.ca:80' },
+		{ urls: 'stun:stun.l.google.com:19302' }
 	],
-	iceCandidatePoolSize: 10
+	iceCandidatePoolSize: 0
 };
+
+// P2P direct connection timeout before falling back to Metered TURN relay (5 seconds)
+export const P2P_CONNECTION_TIMEOUT_MS = 5000;
 
 // 64 KB is standard and optimal for WebRTC DataChannels across all modern browsers
 export const CHUNK_SIZE = 64 * 1024; // 65,536 bytes

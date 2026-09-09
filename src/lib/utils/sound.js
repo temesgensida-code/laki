@@ -1,9 +1,20 @@
 // Tactile Web Audio feedback
 let audioCtx = null;
 let soundEnabled = true;
+let userHasInteracted = false;
 
 if (typeof window !== 'undefined') {
 	soundEnabled = localStorage.getItem('sound_enabled') !== 'false';
+
+	const unlockAudio = () => {
+		userHasInteracted = true;
+		window.removeEventListener('click', unlockAudio);
+		window.removeEventListener('keydown', unlockAudio);
+		window.removeEventListener('touchstart', unlockAudio);
+	};
+	window.addEventListener('click', unlockAudio, { passive: true });
+	window.addEventListener('keydown', unlockAudio, { passive: true });
+	window.addEventListener('touchstart', unlockAudio, { passive: true });
 }
 
 export function isSoundEnabled() {
@@ -19,12 +30,18 @@ export function toggleSound() {
 }
 
 export function playChime(type = 'click') {
-	if (!soundEnabled || typeof window === 'undefined') return;
+	// Never attempt audio creation until user has interacted with the page
+	if (!soundEnabled || typeof window === 'undefined' || !userHasInteracted) return;
 	try {
-		const AudioContext = window.AudioContext || window.webkitAudioContext;
+		const AudioContext = window.AudioContext || /** @type {any} */ (window).webkitAudioContext;
 		if (!AudioContext) return;
-		if (!audioCtx) audioCtx = new AudioContext();
-		if (audioCtx.state === 'suspended') audioCtx.resume();
+		if (!audioCtx) {
+			audioCtx = new AudioContext();
+		}
+		if (audioCtx.state === 'suspended') {
+			audioCtx.resume().catch(() => {});
+			return;
+		}
 
 		const now = audioCtx.currentTime;
 		const osc = audioCtx.createOscillator();

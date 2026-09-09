@@ -80,8 +80,18 @@
 				</span>
 			{/if}
 
-			<!-- Route Type Badge: Direct P2P vs Metered TURN Relay -->
-			{#if stats?.routeType === 'relay'}
+			<!-- Route Type Badge: Direct P2P vs Metered TURN Relay vs Stream Tunnel -->
+			{#if stats?.routeType === 'tunnel'}
+				<span
+					class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-sm text-xs font-mono font-semibold border {theme.current === 'dark'
+						? 'bg-[#16191E] border-blue-500/50 text-blue-300'
+						: 'bg-[#DFDCDB] border-blue-600/50 text-blue-800'}"
+					title="Streaming through fail-safe HTTPS Server Stream Tunnel"
+				>
+					<span class="w-1.5 h-1.5 rounded-full bg-blue-400"></span>
+					<span>Server Tunnel (HTTPS)</span>
+				</span>
+			{:else if stats?.routeType === 'relay'}
 				<span
 					class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-sm text-xs font-mono font-semibold border {theme.current === 'dark'
 						? 'bg-[#16191E] border-amber-500/50 text-amber-300'

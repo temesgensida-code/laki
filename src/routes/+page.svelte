@@ -50,6 +50,7 @@
 
 	// Cached ICE servers
 	let cachedIceServers = $state([]);
+	let iceFetchPromise = null;
 
 	// Modals
 	let showQrModal = $state(false);
@@ -62,19 +63,25 @@
 
 	async function fetchIceServers() {
 		if (cachedIceServers.length > 0) return cachedIceServers;
-		try {
-			const res = await fetch('/api/ice');
-			if (res.ok) {
-				const data = await res.json();
-				if (Array.isArray(data.iceServers) && data.iceServers.length > 0) {
-					cachedIceServers = data.iceServers;
-					return data.iceServers;
+		if (iceFetchPromise) return iceFetchPromise;
+
+		iceFetchPromise = (async () => {
+			try {
+				const res = await fetch('/api/ice');
+				if (res.ok) {
+					const data = await res.json();
+					if (Array.isArray(data.iceServers) && data.iceServers.length > 0) {
+						cachedIceServers = data.iceServers;
+						return data.iceServers;
+					}
 				}
+			} catch (err) {
+				console.warn('[Laki] Could not load dynamic ICE servers, using defaults:', err);
 			}
-		} catch (err) {
-			console.warn('[Laki] Could not load dynamic ICE servers, using defaults:', err);
-		}
-		return [];
+			return [];
+		})();
+
+		return iceFetchPromise;
 	}
 
 	onMount(async () => {
@@ -129,13 +136,8 @@
 
 		const iceServers = await fetchIceServers();
 
-		// Use PeerJS signaling server with fallback capability
-		try {
-			signaling = new PeerJsSignalingClient(sessionId, 'sender', clientId, iceServers);
-		} catch (e) {
-			console.warn('[Laki] PeerJS signaling fallback to SSE:', e);
-			signaling = new SignalingClient(sessionId, 'sender', clientId);
-		}
+		// Direct SSE + HTTP signaling client (immune to Firefox strict WebRTC blocking)
+		signaling = new SignalingClient(sessionId, 'sender', clientId);
 
 		engine = new TransferEngine(signaling, 'sender', iceServers);
 		setupEngineListeners(engine);
@@ -182,12 +184,8 @@
 
 		const iceServers = await fetchIceServers();
 
-		try {
-			signaling = new PeerJsSignalingClient(targetSessionId, 'receiver', clientId, iceServers);
-		} catch (e) {
-			console.warn('[Laki] PeerJS signaling fallback to SSE:', e);
-			signaling = new SignalingClient(targetSessionId, 'receiver', clientId);
-		}
+		// Direct SSE + HTTP signaling client (immune to Firefox strict WebRTC blocking)
+		signaling = new SignalingClient(targetSessionId, 'receiver', clientId);
 
 		engine = new TransferEngine(signaling, 'receiver', iceServers);
 		setupEngineListeners(engine);

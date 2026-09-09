@@ -134,9 +134,16 @@ export class PeerJsSignalingClient {
 	 * @param {import('peerjs').DataConnection} conn
 	 */
 	setupConnection(conn) {
+		if (this.connection && this.connection !== conn) {
+			try {
+				this.connection.close();
+			} catch {
+				// ignore
+			}
+		}
 		this.connection = conn;
 
-		conn.on('open', () => {
+		const handleOpen = () => {
 			this.emit('peer-status', { status: 'connected', peerId: conn.peer });
 
 			// Flush any messages that were queued before connection opened
@@ -144,7 +151,13 @@ export class PeerJsSignalingClient {
 				const item = this.pendingMessages.shift();
 				this.send(item.type, item.data);
 			}
-		});
+		};
+
+		if (conn.open) {
+			handleOpen();
+		} else {
+			conn.on('open', handleOpen);
+		}
 
 		conn.on('data', (data) => {
 			try {
@@ -162,7 +175,9 @@ export class PeerJsSignalingClient {
 		});
 
 		conn.on('close', () => {
-			this.connection = null;
+			if (this.connection === conn) {
+				this.connection = null;
+			}
 			this.emit('peer-status', { status: 'disconnected', peerId: conn.peer });
 		});
 

@@ -179,6 +179,13 @@ export function postMessage(sessionId, senderClientId, role, type, data) {
 		session.fileMeta = data;
 	}
 
+	// Whenever a new offer, fallback, or restart is initiated, purge stale candidate messages
+	if (type === 'offer' || type === 'fallback-to-relay' || type === 'request-ice-restart') {
+		session.messageQueue = session.messageQueue.filter(
+			(m) => m.type !== 'candidate' && m.type !== 'offer'
+		);
+	}
+
 	let delivered = 0;
 	const msgId = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
