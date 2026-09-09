@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: laki
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: METERED_API_KEY
+        sync: false
