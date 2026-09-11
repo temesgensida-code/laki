@@ -1,42 +1,52 @@
-# sv
+# LakiDrop
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
+Direct peer-to-peer file transfer built with SvelteKit, WebRTC, Tailwind CSS, and Google OAuth 2.0.
 
-## Creating a project
+## Google OAuth 2.0 Authentication
 
-If you're seeing this, you've probably already done this step. Congrats!
+Authentication is implemented via Google OAuth 2.0 with PKCE (Proof Key for Code Exchange) and stateless signed session cookies (HMAC-SHA256).
 
-```sh
-# create a new project
-npx sv create my-app
-```
+### Setting Up Google OAuth
 
-To recreate this project with the same configuration:
+1. Go to the [Google Cloud Console](https://console.cloud.google.com/apis/credentials).
+2. Create a new project (or select an existing one) and configure the **OAuth consent screen**.
+3. Under **APIs & Services > Credentials**, click **Create Credentials > OAuth client ID**.
+4. Select **Web application** as the application type.
+5. In **Authorized redirect URIs**, add:
+   - For local development: `http://localhost:5173/auth/google/callback`
+   - For production: `https://<your-domain>/auth/google/callback`
+6. Copy the **Client ID** and **Client Secret** into your `.env` file:
 
-```sh
-# recreate this project
-pnpm dlx sv@0.17.0 create --template minimal --types jsdoc --install pnpm laki
+```env
+GOOGLE_CLIENT_ID="your-client-id.apps.googleusercontent.com"
+GOOGLE_CLIENT_SECRET="your-client-secret"
+AUTH_SECRET="a-random-32-plus-character-secret"
 ```
 
 ## Developing
 
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
+Start the development server:
 
 ```sh
-npm run dev
+pnpm dev
+```
 
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
+Run type-checking and diagnostics:
+
+```sh
+pnpm check
 ```
 
 ## Building
 
-To create a production version of your app:
+To create a production build:
 
 ```sh
-npm run build
+pnpm build
 ```
 
-You can preview the production build with `npm run preview`.
+Preview the production build:
 
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+```sh
+pnpm preview
+```

@@ -8,6 +8,7 @@
 	import StatusBanner from '$lib/components/StatusBanner.svelte';
 	import SuccessCard from '$lib/components/SuccessCard.svelte';
 	import QrModal from '$lib/components/QrModal.svelte';
+	import GoogleConfigModal from '$lib/components/GoogleConfigModal.svelte';
 
 	import { SignalingClient } from '$lib/webrtc/signalingClient.js';
 	import { PeerJsSignalingClient } from '$lib/webrtc/peerjsSignalingClient.js';
@@ -25,6 +26,9 @@
 		RotateCcw,
 		Sparkles
 	} from '@lucide/svelte';
+
+	/** @type {{ data?: { user?: { id: string, email: string, name: string, picture?: string } | null } }} */
+	let { data } = $props();
 
 	// Reactive state variables
 	let activeTab = $state('send'); // 'send' | 'receive'
@@ -54,6 +58,7 @@
 
 	// Modals
 	let showQrModal = $state(false);
+	let showConfigModal = $state(false);
 
 	// Computed share URL
 	let shareUrl = $derived.by(() => {
@@ -90,9 +95,26 @@
 		// Pre-fetch Metered STUN/TURN ICE credentials
 		await fetchIceServers();
 
-		// Check if URL has ?session= or ?code= parameter
+		// Check if URL has ?session= or ?code= parameter or ?auth_error=
 		const urlParams = new URLSearchParams(window.location.search);
 		const urlSession = urlParams.get('session') || urlParams.get('code');
+		const authError = urlParams.get('auth_error');
+
+		if (authError) {
+			if (authError === 'missing_credentials') {
+				showConfigModal = true;
+			} else {
+				errorMessage = `Google authentication notice: ${decodeURIComponent(authError)}`;
+			}
+
+			// Clean up auth_error from URL
+			if (window.history && window.history.replaceState) {
+				urlParams.delete('auth_error');
+				const remainder = urlParams.toString();
+				const cleanUrl = window.location.pathname + (remainder ? `?${remainder}` : '');
+				window.history.replaceState({}, '', cleanUrl);
+			}
+		}
 
 		if (urlSession) {
 			// Automatically join in receive mode
@@ -335,7 +357,7 @@
 		? 'bg-[#191D23] text-[#DEDCDC]'
 		: 'bg-[#DEDCDC] text-[#191D23]'}"
 >
-	<Navbar />
+	<Navbar user={data?.user} />
 
 	<main class="flex-1 max-w-4xl w-full mx-auto px-4 sm:px-6 py-8 sm:py-12">
 		<!-- Hero Title / Status -->
@@ -409,7 +431,7 @@
 		<!-- ============================================== -->
 		<!-- TAB 1: SENDER VIEW -->
 		<!-- ============================================== -->
-		{#if activeTab === 'send'}
+		{#if activeTab === 'send'}\
 			<div class="space-y-6 animate-in fade-in duration-200">
 				<!-- Stage 1: No file chosen yet -->
 				{#if transferState === 'idle'}
@@ -498,61 +520,76 @@
 							Paste the link or 6-character session code provided by the sender to connect and receive the file.
 						</p>
 
-						<div class="flex flex-col sm:flex-row items-center gap-2.5">
+						<div class="flex flex-col sm:flex-row gap-3">
 							<input
 								type="text"
 								bind:value={manualInputCode}
-								placeholder="e.g. swift-4a8x or full link"
-								class="w-full rounded-md px-3.5 py-2.5 text-xs sm:text-sm font-mono border focus:outline-none transition-colors {theme.current === 'dark'
-									? 'bg-[#16191E] border-[#57707A]/50 text-[#DEDCDC] focus:border-[#7B919C]'
-									: 'bg-[#DFDCDB] border-[#989DAA] text-[#191D23] focus:border-[#57707A]'}"
+								placeholder="e.g. 7k3m9p or full share link"
+								class="flex-1 px-4 py-3 rounded-md font-mono text-sm border focus:outline-none focus:ring-2 focus:ring-[#57707A] transition-colors {theme.current === 'dark'
+									? 'bg-[#16191E] border-[#57707A]/50 text-[#DEDCDC] placeholder-[#989DAA]'
+									: 'bg-[#DFDCDB] border-[#C5BAC4] text-[#191D23] placeholder-[#57707A]'}"
 								required
 							/>
 							<button
 								type="submit"
-								class="w-full sm:w-auto px-5 py-2.5 rounded-md bg-[#57707A] hover:bg-[#7B919C] text-white font-semibold text-xs sm:text-sm border border-[#7B919C] transition-all duration-150 active:translate-y-px cursor-pointer whitespace-nowrap"
+								class="px-6 py-3 rounded-md bg-[#57707A] hover:bg-[#7B919C] text-white font-semibold text-sm cursor-pointer shadow-md border border-[#7B919C] transition-all duration-150 active:translate-y-px"
 							>
-								Connect to Sender
+								Connect & Receive
 							</button>
 						</div>
 					</form>
 
-				<!-- Stage 2: Waiting for sender metadata -->
-				{:else if transferState === 'waiting-peer' && !fileMeta}
+				<!-- Stage 2: Connecting and waiting for sender to announce file -->
+				{:else if transferState === 'waiting-peer'}
 					<div
-						class="w-full rounded-md p-8 sm:p-12 text-center border transition-colors {theme.current === 'dark'
-							? 'bg-[#21262F] border-[#57707A]/40'
-							: 'bg-[#ECEAE9] border-[#C5BAC4]'}"
+						class="w-full rounded-md p-8 sm:p-12 text-center border shadow-lg transition-colors {theme.current === 'dark'
+							? 'bg-[#21262F] border-[#57707A]/40 text-[#DEDCDC]'
+							: 'bg-[#ECEAE9] border-[#C5BAC4] text-[#191D23]'}"
 					>
-						<div
-							class="inline-flex items-center justify-center w-12 h-12 rounded-md border mb-4 transition-colors {theme.current === 'dark'
-								? 'bg-[#16191E] border-[#57707A]/60 text-[#7B919C]'
-								: 'bg-[#DFDCDB] border-[#989DAA] text-[#57707A]'}"
-						>
-							<Globe class="w-6 h-6 animate-pulse" />
-						</div>
-						<h3 class="text-base sm:text-lg font-bold tracking-tight mb-2 {theme.current === 'dark' ? 'text-[#DEDCDC]' : 'text-[#191D23]'}">
-							Connecting to Sender Session
+						<div class="w-12 h-12 mx-auto mb-4 border-4 border-[#57707A]/30 border-t-[#57707A] rounded-full animate-spin"></div>
+						<h3 class="text-base sm:text-lg font-bold mb-1">
+							{peerConnected ? 'Connected! Waiting for file details...' : 'Connecting to Sender...'}
 						</h3>
-						<p class="text-xs font-mono mb-4 {theme.current === 'dark' ? 'text-[#989DAA]' : 'text-[#57707A]'}">
-							Session: <span class="font-bold text-[#57707A]">{sessionId}</span>
-						</p>
-						<p class="text-xs max-w-md mx-auto {theme.current === 'dark' ? 'text-[#989DAA]' : 'text-[#57707A]'}">
-							Negotiating WebRTC STUN peer-to-peer data channel. Waiting for sender to provide file details...
+						<p class="text-xs font-mono {theme.current === 'dark' ? 'text-[#989DAA]' : 'text-[#57707A]'}">
+							Session: {sessionId}
 						</p>
 					</div>
 
-				<!-- Stage 3: File details received, waiting for user to click "Accept" -->
-				{:else if transferState === 'ready-to-accept' || (fileMeta && transferState === 'waiting-peer')}
-					<FileCard
-						{fileMeta}
-						isReceiver={true}
-						isReadyToAccept={true}
-						onAccept={handleAcceptTransfer}
-						onReject={handleRejectTransfer}
-					/>
+				<!-- Stage 3: File details received -> prompt receiver to accept or decline -->
+				{:else if transferState === 'ready-to-accept'}
+					<div class="space-y-6">
+						<FileCard {fileMeta} />
+						<div
+							class="w-full rounded-md p-6 border shadow-lg text-center {theme.current === 'dark'
+								? 'bg-[#21262F] border-[#57707A]/40'
+								: 'bg-[#ECEAE9] border-[#C5BAC4]'}"
+						>
+							<h3 class="text-base font-bold mb-2">Incoming File Transfer</h3>
+							<p class="text-xs mb-6 {theme.current === 'dark' ? 'text-[#989DAA]' : 'text-[#57707A]'}">
+								The sender is ready to transfer <span class="font-semibold text-current">{fileMeta?.name}</span> directly to this browser.
+							</p>
+							<div class="flex items-center justify-center gap-4">
+								<button
+									type="button"
+									onclick={handleRejectTransfer}
+									class="px-5 py-2.5 rounded-md border text-xs font-semibold cursor-pointer transition-colors {theme.current === 'dark'
+										? 'bg-[#16191E] hover:bg-[#191D23] text-red-400 border-red-900/40'
+										: 'bg-[#DFDCDB] hover:bg-[#D2CECE] text-red-700 border-red-300'}"
+								>
+									Decline
+								</button>
+								<button
+									type="button"
+									onclick={handleAcceptTransfer}
+									class="px-6 py-2.5 rounded-md bg-[#57707A] hover:bg-[#7B919C] text-white text-xs font-semibold shadow-md border border-[#7B919C] cursor-pointer transition-all duration-150 active:translate-y-px"
+								>
+									Accept & Download
+								</button>
+							</div>
+						</div>
+					</div>
 
-				<!-- Stage 4: Receiving chunks -->
+				<!-- Stage 4: Transfer in progress or paused -->
 				{:else if transferState === 'transferring' || transferState === 'paused' || transferState === 'reconnecting'}
 					<FileCard {fileMeta} />
 					<TransferProgress
@@ -653,5 +690,11 @@
 		isOpen={showQrModal}
 		url={shareUrl}
 		onClose={() => (showQrModal = false)}
+	/>
+
+	<!-- Google OAuth Setup Guide Modal -->
+	<GoogleConfigModal
+		isOpen={showConfigModal}
+		onClose={() => (showConfigModal = false)}
 	/>
 </div>

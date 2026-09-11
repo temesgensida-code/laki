@@ -1,4 +1,5 @@
 import { PeerServer } from 'peer';
+import { getSessionUser } from '$lib/server/auth.js';
 
 const PEERJS_PORT = Number(process.env.PEERJS_PORT || 9000);
 
@@ -30,5 +31,8 @@ if (!globalThis.__lakiPeerServer && typeof process !== 'undefined') {
 
 /** @type {import('@sveltejs/kit').Handle} */
 export async function handle({ event, resolve }) {
+	// Authenticate user via signed session cookie
+	event.locals.user = getSessionUser(event.cookies);
+
 	return resolve(event);
 }
