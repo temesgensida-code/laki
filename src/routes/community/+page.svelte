@@ -1,4 +1,5 @@
 <script>
+	import { onMount } from 'svelte';
 	import Navbar from '$lib/components/Navbar.svelte';
 	import CommunityRequestModal from '$lib/components/CommunityRequestModal.svelte';
 	import CommunityFulfillModal from '$lib/components/CommunityFulfillModal.svelte';
@@ -20,7 +21,8 @@
 		ExternalLink,
 		FileText,
 		Sparkles,
-		RotateCw
+		RotateCw,
+		X
 	} from '@lucide/svelte';
 
 	let { data } = $props();
@@ -47,6 +49,21 @@
 	let filterStatus = $state('all'); // 'all' | 'pending' | 'fulfilled'
 	let searchQuery = $state('');
 	let isRefreshing = $state(false);
+	let authErrorMessage = $state('');
+
+	onMount(() => {
+		if (typeof window !== 'undefined') {
+			const urlParams = new URLSearchParams(window.location.search);
+			const authError = urlParams.get('auth_error');
+			if (authError) {
+				authErrorMessage = decodeURIComponent(authError);
+				urlParams.delete('auth_error');
+				const remainder = urlParams.toString();
+				const cleanUrl = window.location.pathname + (remainder ? `?${remainder}` : '');
+				window.history.replaceState({}, '', cleanUrl);
+			}
+		}
+	});
 
 	// Relative time helper
 	function timeAgo(dateString) {
@@ -124,7 +141,7 @@
 
 	function handleOpenRequestModal() {
 		if (!user) {
-			window.location.href = '/auth/google';
+			window.location.href = '/auth/google?returnUrl=/community';
 			return;
 		}
 		playChime('click');
@@ -133,7 +150,7 @@
 
 	function handleOpenFulfill(req) {
 		if (!user) {
-			window.location.href = '/auth/google';
+			window.location.href = '/auth/google?returnUrl=/community';
 			return;
 		}
 		playChime('click');
@@ -143,7 +160,7 @@
 
 	function handleOpenAgree(req) {
 		if (!user) {
-			window.location.href = '/auth/google';
+			window.location.href = '/auth/google?returnUrl=/community';
 			return;
 		}
 		playChime('click');
@@ -198,6 +215,27 @@
 	<!-- Main Content Area -->
 	<main class="flex-1 max-w-4xl w-full mx-auto px-4 sm:px-6 py-6 sm:py-8">
 
+		<!-- Auth Error Notification Banner -->
+		{#if authErrorMessage}
+			<div class="mb-6 p-4 rounded-xl border flex items-start justify-between gap-3 bg-red-500/10 border-red-500/30 text-red-400">
+				<div class="flex items-start gap-3">
+					<AlertCircle class="w-5 h-5 flex-shrink-0 mt-0.5" />
+					<div class="text-xs sm:text-sm">
+						<p class="font-bold">Google Sign-in Notice</p>
+						<p class="mt-0.5 opacity-90">{authErrorMessage}</p>
+					</div>
+				</div>
+				<button
+					type="button"
+					onclick={() => (authErrorMessage = '')}
+					class="p-1 rounded-md hover:bg-red-500/20 text-red-400 cursor-pointer"
+					aria-label="Dismiss error"
+				>
+					<X class="w-4 h-4" />
+				</button>
+			</div>
+		{/if}
+
 		<!-- Hero Section -->
 		<div class="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
 			<div>
@@ -250,7 +288,7 @@
 				</div>
 
 				<a
-					href="/auth/google"
+					href="/auth/google?returnUrl=/community"
 					class="px-4 py-2 text-xs font-semibold rounded-lg border transition-all flex items-center justify-center gap-2 cursor-pointer edgy-btn {theme.current === 'dark'
 						? 'bg-[#21262F] hover:bg-[#2A313C] text-white border-[#57707A]/60'
 						: 'bg-white hover:bg-[#DFDCDB] text-[#191D23] border-[#C5BAC4]'}"

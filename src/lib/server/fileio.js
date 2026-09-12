@@ -1,12 +1,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { env } from '$env/dynamic/private';
 
 const UPLOAD_DIR = path.resolve(process.cwd(), '.data', 'community_files');
 
 // Ensure upload directory exists for resilient local fallback
 if (!fs.existsSync(UPLOAD_DIR)) {
 	fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+}
+
+function getFileIoApiKey() {
+	return env.FILE_IO_API_KEY || (typeof process !== 'undefined' && process.env.FILE_IO_API_KEY);
 }
 
 /**
@@ -37,8 +42,7 @@ export function purgeExpiredFiles() {
  * @param {string} filename
  * @param {string} mimeType
  * @param {string} origin
- * @returns {Promise<{ link: string, key: string, provider: 'file.io' | 'local', expiresAt: Date }>}
- */
+ * @returns {Promise<{ link: string, key: string, provider: 'file.io' | 'local', expiresAt: Date }>}\n */
 export async function uploadResourceFile(buffer, filename, mimeType, origin) {
 	const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
 	const safeFilename = path.basename(filename).replace(/[^a-zA-Z0-9._-]/g, '_');
@@ -51,9 +55,11 @@ export async function uploadResourceFile(buffer, filename, mimeType, origin) {
 		const blob = new Blob([buffer], { type: mimeType || 'application/octet-stream' });
 		formData.append('file', blob, safeFilename);
 
+		/** @type {Record<string, string>} */
 		const headers = {};
-		if (process.env.FILE_IO_API_KEY) {
-			headers['Authorization'] = `Bearer ${process.env.FILE_IO_API_KEY}`;
+		const apiKey = getFileIoApiKey();
+		if (apiKey) {
+			headers['Authorization'] = `Bearer ${apiKey}`;
 		}
 
 		// 15-second timeout for file.io request

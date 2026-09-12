@@ -9,7 +9,7 @@ import {
 } from '$lib/server/auth.js';
 
 /** @type {import('./$types').RequestHandler} */
-export async function GET({ url, cookies }) {
+export async function GET({ url, request, cookies }) {
 	const code = url.searchParams.get('code');
 	const state = url.searchParams.get('state');
 	const error = url.searchParams.get('error');
@@ -18,22 +18,34 @@ export async function GET({ url, cookies }) {
 	const { state: storedState, codeVerifier: storedVerifier, redirectTo } = getOAuthCookies(cookies);
 	clearOAuthCookies(cookies);
 
+	const destination = redirectTo && redirectTo.startsWith('/') ? redirectTo : '/';
+	const makeErrorRedirect = (/** @type {string} */ errCode) => {
+		const [base, query] = destination.split('?');
+		const params = new URLSearchParams(query || '');
+		params.set('auth_error', errCode);
+		return `${base}?${params.toString()}`;
+	};
+
 	if (error) {
 		console.error('[Laki Auth] Google OAuth callback returned error:', error, errorDescription);
-		throw redirect(302, `/?auth_error=${encodeURIComponent(errorDescription || error)}`);
+		throw redirect(302, makeErrorRedirect(errorDescription || error));
 	}
 
 	if (!code || !state) {
 		console.error('[Laki Auth] Missing code or state parameter');
-		throw redirect(302, '/?auth_error=missing_code_or_state');
+		throw redirect(302, makeErrorRedirect('missing_code_or_state'));
 	}
 
 	if (!storedState || storedState !== state || !storedVerifier) {
-		console.error('[Laki Auth] State verification failed');
-		throw redirect(302, '/?auth_error=invalid_state');
+		console.error('[Laki Auth] State verification failed (storedState vs state):', {
+			hasStoredState: Boolean(storedState),
+			matches: storedState === state,
+			hasVerifier: Boolean(storedVerifier)
+		});
+		throw redirect(302, makeErrorRedirect('invalid_state'));
 	}
 
-	const isSecure = url.protocol === 'https:' || process.env.NODE_ENV === 'production';
+	const isSecure = url.protocol === 'https:' || request.headers.get('x-forwarded-proto') === 'https';
 	const redirectUri = getGoogleRedirectUri(url);
 
 	try {
@@ -58,13 +70,12 @@ export async function GET({ url, cookies }) {
 		setSessionCookie(cookies, user, isSecure);
 
 		// Safely redirect to desired destination
-		const destination = redirectTo.startsWith('/') ? redirectTo : '/';
 		throw redirect(302, destination);
 	} catch (err) {
 		if (err && typeof err === 'object' && 'status' in err && err.status === 302) {
 			throw err;
 		}
 		console.error('[Laki Auth] OAuth callback processing error:', err);
-		throw redirect(302, `/?auth_error=${encodeURIComponent(/** @type {Error} */ (err).message || 'auth_failed')}`);
+		throw redirect(302, makeErrorRedirect(/** @type {Error} */ (err).message || 'auth_failed'));
 	}
 }

@@ -9,7 +9,7 @@ import {
 } from '$lib/server/auth.js';
 
 /** @type {import('./$types').RequestHandler} */
-export async function GET({ url, cookies }) {
+export async function GET({ url, request, cookies }) {
 	const returnUrl = url.searchParams.get('returnUrl') || '/';
 
 	if (!isGoogleAuthConfigured()) {
@@ -19,7 +19,7 @@ export async function GET({ url, cookies }) {
 
 	const state = generateRandomString(32);
 	const { codeVerifier, codeChallenge } = generatePKCE();
-	const isSecure = url.protocol === 'https:' || process.env.NODE_ENV === 'production';
+	const isSecure = url.protocol === 'https:' || request.headers.get('x-forwarded-proto') === 'https';
 
 	setOAuthCookies(cookies, { state, codeVerifier, redirectTo: returnUrl }, isSecure);
 

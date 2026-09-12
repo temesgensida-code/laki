@@ -1,7 +1,17 @@
+// Try to load .env into process.env for Node runtime if supported
+try {
+	if (typeof process !== 'undefined' && typeof process.loadEnvFile === 'function') {
+		process.loadEnvFile();
+	}
+} catch (e) {
+	// Ignore if .env is missing or already loaded
+}
+
 import { PeerServer } from 'peer';
 import { getSessionUser } from '$lib/server/auth.js';
+import { env } from '$env/dynamic/private';
 
-const PEERJS_PORT = Number(process.env.PEERJS_PORT || 9000);
+const PEERJS_PORT = Number(env.PEERJS_PORT || (typeof process !== 'undefined' && process.env.PEERJS_PORT) || 9000);
 
 // Ensure PeerServer is initialized once within the Node runtime process
 if (!globalThis.__lakiPeerServer && typeof process !== 'undefined') {

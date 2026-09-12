@@ -1,8 +1,15 @@
 import crypto from 'node:crypto';
+import { env } from '$env/dynamic/private';
 
-const AUTH_SECRET = process.env.AUTH_SECRET || 'laki-insecure-dev-auth-secret-change-in-production-1234567890';
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
-const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
+/**
+ * Safely retrieve an environment variable from SvelteKit's private dynamic env or process.env
+ * @param {string} key
+ * @param {string} [fallback='']
+ * @returns {string}
+ */
+function getEnv(key, fallback = '') {
+	return env[key] || (typeof process !== 'undefined' && process.env[key]) || fallback;
+}
 
 const SESSION_COOKIE_NAME = 'laki_session';
 const OAUTH_STATE_COOKIE_NAME = 'laki_oauth_state';
@@ -12,11 +19,25 @@ const OAUTH_REDIRECT_COOKIE_NAME = 'laki_oauth_redirect';
 const SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60; // 30 days
 const OAUTH_STATE_MAX_AGE_SECONDS = 10 * 60; // 10 minutes
 
+export function getAuthSecret() {
+	return getEnv('AUTH_SECRET', 'laki-insecure-dev-auth-secret-change-in-production-1234567890');
+}
+
+export function getGoogleClientId() {
+	return getEnv('GOOGLE_CLIENT_ID');
+}
+
+export function getGoogleClientSecret() {
+	return getEnv('GOOGLE_CLIENT_SECRET');
+}
+
 /**
  * Check if Google OAuth is configured with credentials
  */
 export function isGoogleAuthConfigured() {
-	return Boolean(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET);
+	const clientId = getGoogleClientId();
+	const clientSecret = getGoogleClientSecret();
+	return Boolean(clientId && clientSecret);
 }
 
 /**
@@ -44,10 +65,10 @@ export function generatePKCE() {
 /**
  * Sign a payload object with HMAC-SHA256
  * @param {object} payload
- * @param {string} secret
+ * @param {string} [secret]
  * @returns {string}
  */
-export function signPayload(payload, secret = AUTH_SECRET) {
+export function signPayload(payload, secret = getAuthSecret()) {
 	const json = JSON.stringify(payload);
 	const encodedData = Buffer.from(json, 'utf-8').toString('base64url');
 	const signature = crypto
@@ -61,10 +82,10 @@ export function signPayload(payload, secret = AUTH_SECRET) {
 /**
  * Verify and decode a signed payload
  * @param {string} token
- * @param {string} secret
+ * @param {string} [secret]
  * @returns {any | null}
  */
-export function verifySignedPayload(token, secret = AUTH_SECRET) {
+export function verifySignedPayload(token, secret = getAuthSecret()) {
 	if (!token || typeof token !== 'string') return null;
 
 	const parts = token.split('.');
@@ -106,8 +127,9 @@ export function verifySignedPayload(token, secret = AUTH_SECRET) {
  * @returns {string}
  */
 export function getGoogleRedirectUri(requestUrl) {
-	if (process.env.GOOGLE_REDIRECT_URI) {
-		return process.env.GOOGLE_REDIRECT_URI;
+	const explicit = getEnv('GOOGLE_REDIRECT_URI');
+	if (explicit && explicit.trim()) {
+		return explicit.trim();
 	}
 	return `${requestUrl.origin}/auth/google/callback`;
 }
@@ -120,8 +142,9 @@ export function getGoogleRedirectUri(requestUrl) {
  * @returns {string}
  */
 export function createGoogleAuthUrl(redirectUri, state, codeChallenge) {
+	const clientId = getGoogleClientId();
 	const params = new URLSearchParams({
-		client_id: GOOGLE_CLIENT_ID,
+		client_id: clientId,
 		redirect_uri: redirectUri,
 		response_type: 'code',
 		scope: 'openid email profile',
@@ -142,9 +165,12 @@ export function createGoogleAuthUrl(redirectUri, state, codeChallenge) {
  * @param {string} redirectUri
  */
 export async function exchangeGoogleCode(code, codeVerifier, redirectUri) {
+	const clientId = getGoogleClientId();
+	const clientSecret = getGoogleClientSecret();
+
 	const body = new URLSearchParams({
-		client_id: GOOGLE_CLIENT_ID,
-		client_secret: GOOGLE_CLIENT_SECRET,
+		client_id: clientId,
+		client_secret: clientSecret,
 		code,
 		code_verifier: codeVerifier,
 		grant_type: 'authorization_code',

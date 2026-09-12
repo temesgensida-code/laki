@@ -1,7 +1,13 @@
 import { MongoClient, ServerApiVersion } from 'mongodb';
+import { env } from '$env/dynamic/private';
 
-const uri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017';
-const dbName = process.env.MONGODB_DB_NAME || 'lakidrop';
+function getDbUri() {
+	return env.MONGODB_URI || (typeof process !== 'undefined' && process.env.MONGODB_URI) || 'mongodb://127.0.0.1:27017';
+}
+
+function getDbName() {
+	return env.MONGODB_DB_NAME || (typeof process !== 'undefined' && process.env.MONGODB_DB_NAME) || 'lakidrop';
+}
 
 /** @type {MongoClient | null} */
 let clientInstance = null;
@@ -16,6 +22,9 @@ export async function getMongoClient() {
 	if (clientInstance) {
 		return clientInstance;
 	}
+
+	const uri = getDbUri();
+	const dbName = getDbName();
 
 	if (!clientPromise) {
 		const client = new MongoClient(uri, {
@@ -46,7 +55,7 @@ export async function getMongoClient() {
  */
 export async function getDb() {
 	const client = await getMongoClient();
-	return client.db(dbName);
+	return client.db(getDbName());
 }
 
 /**

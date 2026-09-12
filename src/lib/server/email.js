@@ -1,11 +1,20 @@
 import { Resend } from 'resend';
+import { env } from '$env/dynamic/private';
+
+function getResendApiKey() {
+	return env.RESEND_API_KEY || (typeof process !== 'undefined' && process.env.RESEND_API_KEY);
+}
+
+function getResendFrom() {
+	return env.RESEND_FROM || (typeof process !== 'undefined' && process.env.RESEND_FROM) || 'LakiDrop Community <onboarding@resend.dev>';
+}
 
 /**
  * Initializes and returns the Resend client if RESEND_API_KEY is present
  * @returns {Resend | null}
  */
 function getResendClient() {
-	const apiKey = process.env.RESEND_API_KEY;
+	const apiKey = getResendApiKey();
 	if (!apiKey) {
 		return null;
 	}
@@ -115,7 +124,7 @@ export async function sendResourceFulfilledNotification({
 	const resend = getResendClient();
 
 	if (resend) {
-		const fromAddress = process.env.RESEND_FROM || 'LakiDrop Community <onboarding@resend.dev>';
+		const fromAddress = getResendFrom();
 		console.log(`[Resend Email] Sending fulfillment emails via Resend to ${recipients.length} recipient(s)...`);
 
 		// Send to each recipient individually to strictly maintain email privacy
@@ -144,7 +153,7 @@ export async function sendResourceFulfilledNotification({
 		console.log('\n================== [RESEND EMAIL SIMULATION] ==================');
 		console.log(`Provider: Resend Transactional Email`);
 		console.log(`To (${recipients.length} recipient(s)): ${recipients.join(', ')}`);
-		console.log(`From: ${process.env.RESEND_FROM || 'LakiDrop Community <onboarding@resend.dev>'}`);
+		console.log(`From: ${getResendFrom()}`);
 		console.log(`Subject: ${subject}`);
 		console.log(`Resource: "${requestTitle}"`);
 		console.log(`Fulfilled By: ${fulfilledByName}`);
