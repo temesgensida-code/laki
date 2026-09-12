@@ -32,6 +32,7 @@
 		"peer": "^1.0.2",
 		"peerjs": "^1.5.5",
 		"qrcode": "^1.5.4",
+		"resend": "^6.27.0",
 		"tailwind-merge": "^3.6.0",
 		"tailwindcss": "^4.3.3"
 	}

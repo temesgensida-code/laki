@@ -1,28 +1,19 @@
-import nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 
 /**
- * Creates or retrieves a nodemailer transporter if SMTP is configured
+ * Initializes and returns the Resend client if RESEND_API_KEY is present
+ * @returns {Resend | null}
  */
-function getTransporter() {
-	const host = process.env.SMTP_HOST;
-	const port = Number(process.env.SMTP_PORT) || 587;
-	const user = process.env.SMTP_USER;
-	const pass = process.env.SMTP_PASS;
-
-	if (!host || !user || !pass) {
+function getResendClient() {
+	const apiKey = process.env.RESEND_API_KEY;
+	if (!apiKey) {
 		return null;
 	}
-
-	return nodemailer.createTransporter({
-		host,
-		port,
-		secure: port === 465,
-		auth: { user, pass }
-	});
+	return new Resend(apiKey);
 }
 
 /**
- * Sends fulfillment notification email to requester and all subscribers
+ * Sends fulfillment notification email to requester and all subscribers using Resend
  * @param {object} params
  * @param {string} params.requestTitle
  * @param {string} params.requesterEmail
@@ -50,7 +41,7 @@ export async function sendResourceFulfilledNotification({
 
 	const recipients = Array.from(emailSet);
 	if (recipients.length === 0) {
-		console.log('[Email] No recipients found for notification.');
+		console.log('[Resend Email] No recipients found for notification.');
 		return;
 	}
 
@@ -121,34 +112,45 @@ export async function sendResourceFulfilledNotification({
 </html>
 	`.trim();
 
-	const transporter = getTransporter();
+	const resend = getResendClient();
 
-	if (transporter) {
-		try {
-			const fromAddress = process.env.SMTP_FROM || `"LakiDrop Community" <${process.env.SMTP_USER}>`;
-			console.log(`[Email] Sending fulfillment emails to ${recipients.length} recipient(s)...`);
+	if (resend) {
+		const fromAddress = process.env.RESEND_FROM || 'LakiDrop Community <onboarding@resend.dev>';
+		console.log(`[Resend Email] Sending fulfillment emails via Resend to ${recipients.length} recipient(s)...`);
 
-			await transporter.sendMail({
-				from: fromAddress,
-				to: recipients,
-				subject,
-				html
-			});
+		// Send to each recipient individually to strictly maintain email privacy
+		const sendPromises = recipients.map(async (recipient) => {
+			try {
+				const response = await resend.emails.send({
+					from: fromAddress,
+					to: recipient,
+					subject,
+					html
+				});
 
-			console.log(`[Email] Notification sent successfully to: ${recipients.join(', ')}`);
-		} catch (err) {
-			console.error('[Email] Failed to send email via SMTP:', /** @type {Error} */ (err).message);
-		}
+				if (response.error) {
+					console.error(`[Resend Email] Error sending to ${recipient}:`, response.error);
+				} else {
+					console.log(`[Resend Email] Successfully sent notification to ${recipient} (id: ${response.data?.id})`);
+				}
+			} catch (sendErr) {
+				console.error(`[Resend Email] Exception sending to ${recipient}:`, /** @type {Error} */ (sendErr).message);
+			}
+		});
+
+		await Promise.allSettled(sendPromises);
 	} else {
-		// Development mode fallback logging
-		console.log('\n================== [COMMUNITY NOTIFICATION EMAIL SIMULATION] ==================');
-		console.log(`To: ${recipients.join(', ')}`);
+		// Development mode fallback simulation
+		console.log('\n================== [RESEND EMAIL SIMULATION] ==================');
+		console.log(`Provider: Resend Transactional Email`);
+		console.log(`To (${recipients.length} recipient(s)): ${recipients.join(', ')}`);
+		console.log(`From: ${process.env.RESEND_FROM || 'LakiDrop Community <onboarding@resend.dev>'}`);
 		console.log(`Subject: ${subject}`);
 		console.log(`Resource: "${requestTitle}"`);
 		console.log(`Fulfilled By: ${fulfilledByName}`);
 		console.log(`Download Link: ${downloadUrl}`);
 		console.log(`Expires At: ${formattedExpiry}`);
-		console.log('NOTE: To send live emails, define SMTP_HOST, SMTP_USER, and SMTP_PASS in .env');
-		console.log('===============================================================================\n');
+		console.log('NOTE: To send live emails using Resend, define RESEND_API_KEY in your .env file.');
+		console.log('===============================================================\n');
 	}
 }
