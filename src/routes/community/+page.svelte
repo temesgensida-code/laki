@@ -384,147 +384,69 @@
 		{:else}
 			<div class="space-y-0">
 				{#each filteredRequests as req, index (req.id)}
-					<!-- Individual Resource Request Card -->
-					<article class="p-5 sm:p-6 rounded-xl border transition-all edgy-card {theme.current === 'dark'
-						? 'bg-[#191D23] border-[#57707A]/40'
-						: 'bg-[#ECEAE9] border-[#C5BAC4]'}">
-
-						<!-- Top Requester Meta & Status Badge -->
-						<div class="flex items-center justify-between gap-3 mb-3">
-							<!-- Requester Identity -->
-							<div class="flex items-center gap-2.5 min-w-0">
+					<!-- Individual Community Request (No Box Container, Shrunk Low-Height) -->
+					<div class="py-2.5 sm:py-3 transition-colors">
+						<!-- Top Row: Requester Info, Badges & Action Buttons -->
+						<div class="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+							<!-- Left Meta: Avatar, Name, Time, Status, Subscribers -->
+							<div class="flex items-center gap-2 min-w-0 flex-wrap">
 								{#if req.requester?.picture}
 									<img
 										src={req.requester.picture}
 										alt={req.requester.name}
-										class="w-7 h-7 rounded-full object-cover ring-1 {theme.current === 'dark' ? 'ring-[#57707A]' : 'ring-[#7B919C]'}"
+										class="w-5 h-5 rounded-full object-cover ring-1 {theme.current === 'dark' ? 'ring-[#57707A]' : 'ring-[#7B919C]'}"
 										referrerpolicy="no-referrer"
 									/>
 								{:else}
-									<div class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold uppercase bg-[#57707A] text-white">
+									<div class="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold uppercase bg-[#57707A] text-white">
 										{req.requester?.name ? req.requester.name.charAt(0) : 'U'}
 									</div>
 								{/if}
 
-								<div class="min-w-0">
-									<div class="flex items-center gap-1.5">
-										<span class="text-xs font-bold truncate">{req.requester?.name || 'Community Member'}</span>
-										{#if req.isRequester}
-											<span class="px-1.5 py-0.2 rounded text-[10px] font-semibold bg-sky-500/20 text-sky-400 border border-sky-500/30">
-												You
-											</span>
-										{/if}
-									</div>
-									<span class="text-[10px] {theme.current === 'dark' ? 'text-[#989DAA]' : 'text-[#57707A]'}">
-										Requested {timeAgo(req.createdAt)}
-									</span>
-								</div>
-							</div>
+								<span class="text-xs font-bold truncate">{req.requester?.name || 'Community Member'}</span>
 
-							<!-- Status Badge -->
-							<div>
+								{#if req.isRequester}
+									<span class="px-1.5 py-0.2 rounded text-[9px] font-semibold bg-sky-500/15 text-sky-400 border border-sky-500/25">
+										You
+									</span>
+								{/if}
+
+								<span class="text-[11px] {theme.current === 'dark' ? 'text-[#989DAA]' : 'text-[#57707A]'}">
+									&bull; {timeAgo(req.createdAt)}
+								</span>
+
+								<!-- Status Badge (compact) -->
 								{#if req.status === 'fulfilled'}
-									<div class="px-2.5 py-1 rounded-md text-[11px] font-semibold flex items-center gap-1.5 border bg-emerald-500/15 border-emerald-500/40 text-emerald-400">
-										<CheckCircle2 class="w-3.5 h-3.5" />
-										<span>Fulfilled</span>
-									</div>
+									<span class="px-2 py-0.5 rounded text-[10px] font-medium flex items-center gap-1 border bg-emerald-500/15 border-emerald-500/35 text-emerald-400">
+										<CheckCircle2 class="w-3 h-3" /> Fulfilled
+									</span>
 								{:else if req.status === 'expired'}
-									<div class="px-2.5 py-1 rounded-md text-[11px] font-semibold flex items-center gap-1.5 border bg-zinc-500/15 border-zinc-500/40 text-zinc-400">
-										<Clock class="w-3.5 h-3.5" />
-										<span>Expired (24h)</span>
-									</div>
+									<span class="px-2 py-0.5 rounded text-[10px] font-medium flex items-center gap-1 border bg-zinc-500/15 border-zinc-500/35 text-zinc-400">
+										<Clock class="w-3 h-3" /> Expired (24h)
+									</span>
 								{:else}
-									<div class="px-2.5 py-1 rounded-md text-[11px] font-semibold flex items-center gap-1.5 border bg-amber-500/15 border-amber-500/40 text-amber-400">
-										<Clock class="w-3.5 h-3.5" />
-										<span>Pending Volunteer</span>
-									</div>
+									<span class="px-2 py-0.5 rounded text-[10px] font-medium flex items-center gap-1 border bg-amber-500/15 border-amber-500/35 text-amber-400">
+										<Clock class="w-3 h-3" /> Pending
+									</span>
+								{/if}
+
+								<!-- Waiting count indicator -->
+								{#if req.subscriberCount > 0}
+									<span class="text-[11px] flex items-center gap-1 {theme.current === 'dark' ? 'text-[#989DAA]' : 'text-[#57707A]'}">
+										<Users class="w-3 h-3" />
+										<span>{req.subscriberCount} waiting</span>
+									</span>
 								{/if}
 							</div>
-						</div>
 
-						<!-- Title and Description -->
-						<div class="mb-4">
-							<h2 class="text-base sm:text-lg font-bold font-lexend tracking-tight mb-1.5">
-								{req.title}
-							</h2>
-							<p class="text-xs sm:text-sm leading-relaxed whitespace-pre-line {theme.current === 'dark' ? 'text-[#DEDCDC]/90' : 'text-[#191D23]/90'}">
-								{req.description}
-							</p>
-						</div>
-
-						<!-- Fulfilled Download Box (If Fulfilled) -->
-						{#if req.status === 'fulfilled' && req.fulfillment}
-							<div class="mb-4 p-4 rounded-xl border {theme.current === 'dark'
-								? 'bg-[#16191E] border-emerald-500/30'
-								: 'bg-white border-emerald-600/40'}">
-								<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-									<div class="flex items-center gap-3 min-w-0">
-										<div class="w-10 h-10 rounded-lg flex items-center justify-center border bg-emerald-500/15 border-emerald-500/30 text-emerald-400 flex-shrink-0">
-											<FileText class="w-5 h-5" />
-										</div>
-										<div class="min-w-0">
-											<div class="flex items-center gap-1.5">
-												<p class="text-xs font-bold truncate">{req.fulfillment.fileName}</p>
-												<span class="text-[10px] font-mono opacity-70">
-													({formatBytes(req.fulfillment.fileSize)})
-												</span>
-											</div>
-											<p class="text-[11px] {theme.current === 'dark' ? 'text-[#989DAA]' : 'text-[#57707A]'}">
-												Fulfilled by <strong class="text-[#DEDCDC]">{req.fulfillment.fulfilledBy?.name || 'Volunteer'}</strong> &bull;
-												<span class="text-amber-400 font-semibold inline-flex items-center gap-0.5">
-													<Clock class="w-3 h-3 inline" /> {formatExpiryTime(req.fulfillment.expiresAt)}
-												</span>
-											</p>
-										</div>
-									</div>
-
-									<!-- Download Button -->
-									<a
-										href={req.fulfillment.fileLink}
-										target="_blank"
-										rel="noreferrer"
-										download
-										class="px-4 py-2 text-xs font-semibold rounded-lg border transition-all flex items-center justify-center gap-1.5 cursor-pointer edgy-btn flex-shrink-0 {theme.current === 'dark'
-											? 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-500'
-											: 'bg-emerald-700 hover:bg-emerald-800 text-white border-emerald-700'}"
-									>
-										<Download class="w-3.5 h-3.5" />
-										<span>Download File</span>
-										<ExternalLink class="w-3 h-3 opacity-70" />
-									</a>
-								</div>
-
-								<div class="mt-2.5 pt-2 border-t flex items-center justify-between text-[10px] font-mono {theme.current === 'dark'
-									? 'border-[#57707A]/20 text-[#7B919C]'
-									: 'border-[#C5BAC4]/50 text-[#57707A]'}">
-									<span>Hosted via file.io API &bull; 24-hour single lifecycle</span>
-									<span>Expires: {new Date(req.fulfillment.expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-								</div>
-							</div>
-						{/if}
-
-						<!-- Card Footer: Subscribers Count & Actions -->
-						<div class="flex flex-wrap items-center justify-between gap-3 pt-3 border-t {theme.current === 'dark' ? 'border-[#57707A]/20' : 'border-[#C5BAC4]/50'}">
-							<!-- Waiting count / subscribers info -->
-							<div class="flex items-center gap-2 text-xs {theme.current === 'dark' ? 'text-[#989DAA]' : 'text-[#57707A]'}">
-								<Users class="w-3.5 h-3.5" />
-								<span>
-									{#if req.subscriberCount > 0}
-										<strong>{req.subscriberCount}</strong> {req.subscriberCount === 1 ? 'other person' : 'people'} also waiting for this
-									{:else}
-										Requester waiting for volunteer
-									{/if}
-								</span>
-							</div>
-
-							<!-- Action Buttons -->
-							<div class="flex items-center gap-2">
+							<!-- Right Meta: Compact Action Buttons -->
+							<div class="flex items-center gap-1.5 shrink-0 ml-auto">
 								<!-- "I Need This Too / Agree" Button -->
 								{#if !req.isRequester && req.status === 'pending'}
 									<button
 										type="button"
 										onclick={() => handleOpenAgree(req)}
-										class="px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all cursor-pointer flex items-center gap-1.5 edgy-btn {req.hasSubscribed
+										class="h-7 px-2.5 text-xs font-semibold rounded-md border transition-all cursor-pointer flex items-center gap-1.5 edgy-btn {req.hasSubscribed
 											? (theme.current === 'dark'
 												? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40'
 												: 'bg-indigo-50 text-indigo-800 border-indigo-300')
@@ -532,33 +454,76 @@
 												? 'bg-[#21262F] hover:bg-[#2A313C] text-[#DEDCDC] border-[#57707A]/40'
 												: 'bg-white hover:bg-[#DFDCDB] text-[#191D23] border-[#C5BAC4]')}"
 									>
-										<Bell class="w-3.5 h-3.5" />
+										<Bell class="w-3 h-3" />
 										<span>{req.hasSubscribed ? 'Subscribed' : 'I Need This Too'}</span>
 									</button>
 								{/if}
 
-								<!-- "Fulfill / Share File" Button -->
+								<!-- "Volunteer / Share File" Button -->
 								{#if req.status === 'pending'}
 									<button
 										type="button"
 										onclick={() => handleOpenFulfill(req)}
-										class="px-3.5 py-1.5 text-xs font-semibold rounded-lg border transition-all cursor-pointer flex items-center gap-1.5 edgy-btn {theme.current === 'dark'
+										class="h-7 px-2.5 text-xs font-semibold rounded-md border transition-all cursor-pointer flex items-center gap-1.5 edgy-btn {theme.current === 'dark'
 											? 'bg-emerald-600/90 hover:bg-emerald-600 text-white border-emerald-500/60'
 											: 'bg-emerald-700 hover:bg-emerald-800 text-white border-emerald-700'}"
 									>
 										<UploadCloud class="w-3.5 h-3.5" />
-										<span>Volunteer / Share File</span>
+										<span>Volunteer File</span>
 									</button>
 								{/if}
 							</div>
 						</div>
-					</article>
 
-					<!-- Thin horizontal line separator between requests as requested (Requirement 6) -->
-					{#if index < filteredRequests.length - 1}
-						<div class="py-3 sm:py-4">
-							<hr class="border-t transition-colors {theme.current === 'dark' ? 'border-[#57707A]/25' : 'border-[#C5BAC4]/70'}" />
+						<!-- Middle Row: Title & Description (Compact) -->
+						<div class="space-y-0.5">
+							<h2 class="text-sm sm:text-base font-bold font-lexend tracking-tight {theme.current === 'dark' ? 'text-[#DEDCDC]' : 'text-[#191D23]'}">
+								{req.title}
+							</h2>
+							{#if req.description}
+								<p class="text-xs leading-relaxed whitespace-pre-line {theme.current === 'dark' ? 'text-[#989DAA]' : 'text-[#57707A]'}">
+									{req.description}
+								</p>
+							{/if}
 						</div>
+
+						<!-- Fulfilled Download Bar (Slim 1-line strip if Fulfilled) -->
+						{#if req.status === 'fulfilled' && req.fulfillment}
+							<div class="mt-2 py-1.5 px-3 rounded-lg flex flex-wrap items-center justify-between gap-2 text-xs border {theme.current === 'dark'
+								? 'bg-[#21262F]/60 border-emerald-500/30'
+								: 'bg-white/80 border-emerald-600/30'}">
+								<div class="flex items-center gap-2 min-w-0">
+									<FileText class="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+									<span class="font-medium text-xs truncate max-w-[180px] sm:max-w-xs">{req.fulfillment.fileName}</span>
+									<span class="text-[10px] font-mono opacity-70">({formatBytes(req.fulfillment.fileSize)})</span>
+									<span class="text-[11px] hidden sm:inline {theme.current === 'dark' ? 'text-[#989DAA]' : 'text-[#57707A]'}">
+										by <strong class="text-current">{req.fulfillment.fulfilledBy?.name || 'Volunteer'}</strong>
+									</span>
+									<span class="text-amber-400 font-semibold text-[11px] inline-flex items-center gap-0.5 ml-1">
+										<Clock class="w-3 h-3" /> {formatExpiryTime(req.fulfillment.expiresAt)}
+									</span>
+								</div>
+
+								<a
+									href={req.fulfillment.fileLink}
+									target="_blank"
+									rel="noreferrer"
+									download
+									class="h-6 px-2.5 text-xs font-semibold rounded border transition-all flex items-center gap-1.5 cursor-pointer shrink-0 {theme.current === 'dark'
+										? 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-500'
+										: 'bg-emerald-700 hover:bg-emerald-800 text-white border-emerald-700'}"
+								>
+									<Download class="w-3 h-3" />
+									<span>Download</span>
+									<ExternalLink class="w-2.5 h-2.5 opacity-70" />
+								</a>
+							</div>
+						{/if}
+					</div>
+
+					<!-- Thin horizontal line separator between requests only -->
+					{#if index < filteredRequests.length - 1}
+						<hr class="border-t transition-colors my-2.5 sm:my-3 {theme.current === 'dark' ? 'border-[#57707A]/25' : 'border-[#C5BAC4]/70'}" />
 					{/if}
 				{/each}
 			</div>
