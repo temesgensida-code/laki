@@ -22,7 +22,10 @@
 		FileText,
 		Sparkles,
 		RotateCw,
-		X
+		X,
+		Trash2,
+		BellOff,
+		Loader2
 	} from '@lucide/svelte';
 
 	let { data } = $props();
@@ -198,6 +201,76 @@
 			}
 			return r;
 		});
+	}
+
+	let isDeletingId = $state(null);
+	let isTogglingAgreeId = $state(null);
+
+	async function handleDeleteRequest(req) {
+		if (!user) return;
+		if (!confirm(`Are you sure you want to delete your request "${req.title}"? This cannot be undone.`)) {
+			return;
+		}
+
+		playChime('click');
+		isDeletingId = req.id;
+		try {
+			const res = await fetch(`/api/community/requests/${req.id}`, {
+				method: 'DELETE'
+			});
+			const data = await res.json();
+			if (!res.ok || !data.success) {
+				alert(data.error || 'Failed to delete request.');
+				return;
+			}
+			playChime('complete');
+			requests = requests.filter((r) => r.id !== req.id);
+		} catch (err) {
+			alert('Network error while deleting request.');
+		} finally {
+			isDeletingId = null;
+		}
+	}
+
+	async function handleToggleAgree(req) {
+		if (!user) {
+			window.location.href = '/auth/google?returnUrl=/community';
+			return;
+		}
+
+		if (req.hasSubscribed) {
+			// Direct 1-click unsubscribe
+			playChime('click');
+			isTogglingAgreeId = req.id;
+			try {
+				const res = await fetch(`/api/community/requests/${req.id}/agree`, {
+					method: 'DELETE'
+				});
+				const data = await res.json();
+				if (res.ok && data.success) {
+					playChime('click');
+					requests = requests.map((r) => {
+						if (r.id === req.id) {
+							return {
+								...r,
+								hasSubscribed: false,
+								subscriberCount: data.subscriberCount
+							};
+						}
+						return r;
+					});
+				} else {
+					alert(data.error || 'Failed to unsubscribe.');
+				}
+			} catch (err) {
+				alert('Network error while unsubscribing.');
+			} finally {
+				isTogglingAgreeId = null;
+			}
+		} else {
+			// Open the agree modal so they can verify email / subscribe
+			handleOpenAgree(req);
+		}
 	}
 </script>
 
@@ -441,21 +514,33 @@
 
 							<!-- Right Meta: Compact Action Buttons -->
 							<div class="flex items-center gap-1.5 shrink-0 ml-auto">
-								<!-- "I Need This Too / Agree" Button -->
+								<!-- "I Need This Too / Agree" Button (Non-requester & pending only) -->
 								{#if !req.isRequester && req.status === 'pending'}
 									<button
 										type="button"
-										onclick={() => handleOpenAgree(req)}
-										class="h-7 px-2.5 text-xs font-semibold rounded-md border transition-all cursor-pointer flex items-center gap-1.5 edgy-btn {req.hasSubscribed
+										onclick={() => handleToggleAgree(req)}
+										disabled={isTogglingAgreeId === req.id}
+										title={req.hasSubscribed ? 'Click to remove your interest' : 'Click to request notifications for this file'}
+										class="group h-7 px-2.5 text-xs font-semibold rounded-md border transition-all cursor-pointer flex items-center gap-1.5 edgy-btn {req.hasSubscribed
 											? (theme.current === 'dark'
-												? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40'
-												: 'bg-indigo-50 text-indigo-800 border-indigo-300')
+												? 'bg-indigo-500/20 hover:bg-red-500/20 text-indigo-300 hover:text-red-300 border-indigo-500/40 hover:border-red-500/40'
+												: 'bg-indigo-50 hover:bg-red-50 text-indigo-800 hover:text-red-700 border-indigo-300 hover:border-red-300')
 											: (theme.current === 'dark'
 												? 'bg-[#21262F] hover:bg-[#2A313C] text-[#DEDCDC] border-[#57707A]/40'
 												: 'bg-white hover:bg-[#DFDCDB] text-[#191D23] border-[#C5BAC4]')}"
 									>
-										<Bell class="w-3 h-3" />
-										<span>{req.hasSubscribed ? 'Subscribed' : 'I Need This Too'}</span>
+										{#if isTogglingAgreeId === req.id}
+											<Loader2 class="w-3 h-3 animate-spin" />
+											<span>Updating...</span>
+										{:else if req.hasSubscribed}
+											<BellOff class="w-3 h-3 hidden group-hover:inline-block" />
+											<Bell class="w-3 h-3 group-hover:hidden" />
+											<span class="group-hover:hidden">Subscribed</span>
+											<span class="hidden group-hover:inline">Remove</span>
+										{:else}
+											<Bell class="w-3 h-3" />
+											<span>I Need This Too</span>
+										{/if}
 									</button>
 								{/if}
 
@@ -470,6 +555,26 @@
 									>
 										<UploadCloud class="w-3.5 h-3.5" />
 										<span>Volunteer File</span>
+									</button>
+								{/if}
+
+								<!-- "Delete Request" Button (Author only) -->
+								{#if req.isRequester}
+									<button
+										type="button"
+										onclick={() => handleDeleteRequest(req)}
+										disabled={isDeletingId === req.id}
+										title="Delete your request"
+										class="h-7 px-2 text-xs font-semibold rounded-md border transition-all cursor-pointer flex items-center gap-1 edgy-btn {theme.current === 'dark'
+											? 'bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 border-red-500/30 hover:border-red-500/50'
+											: 'bg-red-50 hover:bg-red-100 text-red-700 hover:text-red-800 border-red-200 hover:border-red-300'}"
+									>
+										{#if isDeletingId === req.id}
+											<Loader2 class="w-3 h-3 animate-spin" />
+										{:else}
+											<Trash2 class="w-3.5 h-3.5" />
+										{/if}
+										<span class="hidden sm:inline">Delete</span>
 									</button>
 								{/if}
 							</div>

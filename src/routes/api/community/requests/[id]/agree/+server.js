@@ -91,6 +91,10 @@ export async function DELETE({ params, locals }) {
 
 		const updatedDoc = await collection.findOne({ _id: new ObjectId(id) });
 		const count = updatedDoc?.subscribers?.length || 0;
+		await collection.updateOne(
+			{ _id: new ObjectId(id) },
+			{ $set: { subscriberCount: count } }
+		);
 
 		return json({
 			success: true,
