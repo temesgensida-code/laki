@@ -565,16 +565,16 @@
 										onclick={() => handleDeleteRequest(req)}
 										disabled={isDeletingId === req.id}
 										title="Delete your request"
-										class="h-7 px-2 text-xs font-semibold rounded-md border transition-all cursor-pointer flex items-center gap-1 edgy-btn {theme.current === 'dark'
-											? 'bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 border-red-500/30 hover:border-red-500/50'
-											: 'bg-red-50 hover:bg-red-100 text-red-700 hover:text-red-800 border-red-200 hover:border-red-300'}"
+										aria-label="Delete your request"
+										class="h-7 w-7 rounded-md border transition-all cursor-pointer flex items-center justify-center edgy-btn {theme.current === 'dark'
+											? 'text-[#989DAA] hover:text-[#DEDCDC] border-[#57707A]/40 hover:border-[#7B919C] bg-[#21262F]/40 hover:bg-[#2A313C]'
+											: 'text-[#7B919C] hover:text-[#191D23] border-[#C5BAC4] hover:border-[#7B919C] bg-white hover:bg-[#DFDCDB]'}"
 									>
 										{#if isDeletingId === req.id}
-											<Loader2 class="w-3 h-3 animate-spin" />
+											<Loader2 class="w-3.5 h-3.5 animate-spin" />
 										{:else}
 											<Trash2 class="w-3.5 h-3.5" />
 										{/if}
-										<span class="hidden sm:inline">Delete</span>
 									</button>
 								{/if}
 							</div>
