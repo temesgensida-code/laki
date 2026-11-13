@@ -357,11 +357,11 @@
 				<span>Direct Peer-to-Peer Transfer • End-to-End Encrypted</span>
 			</div>
 			<h1
-				class="font-raleway text-5xl sm:text-7xl font-thin tracking-[0.25em] uppercase mb-4 sm:mb-6 {theme.current === 'dark'
+				class="font-lexend text-5xl sm:text-7xl font-bold tracking-tight mb-4 sm:mb-6 {theme.current === 'dark'
 					? 'text-[#DEDCDC]'
 					: 'text-[#191D23]'}"
 			>
-				LAKI
+				Laki
 			</h1>
 		</div>
 
