@@ -336,20 +336,6 @@
 		activeTab = tab;
 		resetAll();
 	}
-
-	function generateSampleFile(sizeMb = 10) {
-		playChime('click');
-		const bytes = sizeMb * 1024 * 1024;
-		const buffer = new Uint8Array(bytes);
-		for (let i = 0; i < buffer.length; i += 1024) {
-			buffer[i] = i % 256;
-		}
-		const sampleBlob = new Blob([buffer], { type: 'application/octet-stream' });
-		const sampleFile = new File([sampleBlob], `sample-${sizeMb}MB-dataset.bin`, {
-			type: 'application/octet-stream'
-		});
-		handleFileSelected(sampleFile);
-	}
 </script>
 
 <div
@@ -371,22 +357,12 @@
 				<span>Direct Peer-to-Peer Transfer • End-to-End Encrypted</span>
 			</div>
 			<h1
-				class="font-lexend text-3xl sm:text-5xl font-extrabold tracking-tight mb-3 sm:mb-4 {theme.current === 'dark'
+				class="font-raleway text-5xl sm:text-7xl font-thin tracking-[0.25em] uppercase mb-4 sm:mb-6 {theme.current === 'dark'
 					? 'text-[#DEDCDC]'
 					: 'text-[#191D23]'}"
 			>
-				Send files directly.<br />
-				<span class="text-[#57707A]">
-					No cloud. No size limits.
-				</span>
+				LAKI
 			</h1>
-			<p
-				class="text-xs sm:text-sm max-w-lg mx-auto leading-relaxed {theme.current === 'dark'
-					? 'text-[#989DAA]'
-					: 'text-[#57707A]'}"
-			>
-				Fast, private WebRTC streaming. Files fly directly between devices through chunked data channels with automatic backpressure and network recovery.
-			</p>
 		</div>
 
 		<!-- Mode Switcher Tabs (Edgy Capsule) -->
@@ -431,23 +407,11 @@
 		<!-- ============================================== -->
 		<!-- TAB 1: SENDER VIEW -->
 		<!-- ============================================== -->
-		{#if activeTab === 'send'}\
+		{#if activeTab === 'send'}
 			<div class="space-y-6 animate-in fade-in duration-200">
 				<!-- Stage 1: No file chosen yet -->
 				{#if transferState === 'idle'}
 					<DropZone onFileSelected={handleFileSelected} />
-
-					<!-- Quick demo generator for rapid testing -->
-					<div class="text-center pt-2">
-						<span class="text-xs mr-2 {theme.current === 'dark' ? 'text-[#989DAA]' : 'text-[#57707A]'}">Want to test right now?</span>
-						<button
-							type="button"
-							onclick={() => generateSampleFile(15)}
-							class="text-xs font-semibold text-[#57707A] hover:text-[#7B919C] underline decoration-2 underline-offset-4 cursor-pointer"
-						>
-							Generate 15 MB test sample file
-						</button>
-					</div>
 
 				<!-- Stage 2: File chosen, waiting for receiver / ready -->
 				{:else if transferState === 'waiting-peer' || transferState === 'ready-to-accept'}

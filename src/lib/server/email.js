@@ -6,7 +6,11 @@ function getResendApiKey() {
 }
 
 function getResendFrom() {
-	return env.RESEND_FROM || (typeof process !== 'undefined' && process.env.RESEND_FROM) || 'LakiDrop Community <onboarding@resend.dev>';
+	return (
+		env.RESEND_FROM ||
+		(typeof process !== 'undefined' && process.env.RESEND_FROM) ||
+		'Laki <no-reply@send.laki.temesgen.works>'
+	);
 }
 
 /**
