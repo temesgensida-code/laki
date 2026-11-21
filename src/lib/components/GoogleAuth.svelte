@@ -58,7 +58,7 @@
 			onclick={toggleMenu}
 			aria-expanded={isOpen}
 			aria-haspopup="true"
-			class="h-9 px-2 flex items-center gap-2 rounded-lg border transition-all cursor-pointer edgy-btn {theme.current === 'dark'
+			class="h-7.5 sm:h-9 px-1.5 sm:px-2 flex items-center gap-1.5 sm:gap-2 rounded-md sm:rounded-lg border transition-all cursor-pointer edgy-btn {theme.current === 'dark'
 				? 'bg-[#191D23] hover:bg-[#21262F] text-[#DEDCDC] border-[#57707A]/50 shadow-inner'
 				: 'bg-[#ECEAE9] hover:bg-[#DFDCDB] text-[#191D23] border-[#C5BAC4] shadow-sm'}"
 			title="Google Account: {user.name} ({user.email})"
@@ -80,7 +80,7 @@
 				</div>
 			{/if}
 
-			<span class="text-xs font-medium max-w-[90px] sm:max-w-[120px] truncate hidden xs:inline">
+			<span class="text-xs font-medium max-w-[90px] sm:max-w-[120px] truncate hidden md:inline">
 				{user.name}
 			</span>
 
@@ -149,14 +149,14 @@
 		<!-- Unauthenticated: Sign in with Google Button -->
 		<a
 			href="/auth/google"
-			class="h-9 px-3 flex items-center gap-2 rounded-lg border font-medium text-xs transition-all edgy-btn cursor-pointer shadow-sm {theme.current === 'dark'
+			class="h-7.5 sm:h-9 px-2 sm:px-3 flex items-center gap-1.5 sm:gap-2 rounded-md sm:rounded-lg border font-medium text-xs transition-all edgy-btn cursor-pointer shadow-sm {theme.current === 'dark'
 				? 'bg-[#191D23] hover:bg-[#21262F] text-[#DEDCDC] border-[#57707A]/50 hover:border-[#7B919C]'
 				: 'bg-[#ECEAE9] hover:bg-[#DFDCDB] text-[#191D23] border-[#C5BAC4] hover:border-[#7B919C]'}"
 			title="Sign in with Google"
 		>
-			<GoogleIcon size={16} />
+			<GoogleIcon size={14} class="sm:w-4 sm:h-4 shrink-0" />
 			<span class="hidden sm:inline">Sign in with Google</span>
-			<span class="sm:hidden">Sign in</span>
+			<span class="sm:hidden text-xs">Sign in</span>
 		</a>
 	{/if}
 </div>
